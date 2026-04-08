@@ -1,0 +1,219 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Space Mono', monospace;
+    background: #070505;
+    color: #aaa;
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: hidden;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.container {
+    max-width: 480px;
+    width: 100%;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    animation: reveal 0.4s ease-out forwards;
+}
+
+h1 {
+    font-size: 2.4rem;
+    font-weight: 400;
+    letter-spacing: 0.35em;
+    text-transform: lowercase;
+    margin-bottom: 0.75rem;
+    color: #b88;
+    text-shadow:
+        -1.5px 0 1.5px rgba(200, 0, 40, 0.7),
+        1.5px 0 1.5px rgba(40, 0, 60, 0.7);
+}
+
+.subtitle {
+    color: #555;
+    margin-bottom: 3rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-style: italic;
+}
+
+.view {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    min-height: 220px;
+    justify-content: center;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+.fade-in {
+    animation: reveal 0.3s ease-out forwards;
+}
+
+@keyframes reveal {
+    from { opacity: 0; filter: blur(8px); }
+    to   { opacity: 1; filter: blur(0); }
+}
+
+/* Record button — dark confessional grille */
+.record-btn {
+    width: 96px;
+    height: 96px;
+    border-radius: 50%;
+    border: 1px solid #3a1a1a;
+    background: radial-gradient(circle at center, #1a0808 0%, #0a0505 70%);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.3s;
+}
+
+.record-btn:hover {
+    border-color: #5a2020;
+}
+
+.record-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #8a1a1a;
+    transition: border-radius 0.2s, background 0.2s;
+}
+
+.record-btn.recording .record-icon {
+    border-radius: 3px;
+    background: #c44;
+}
+
+.record-time {
+    color: #b55;
+    font-size: 1.2rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.1em;
+    transform: scale(1);
+    transform-origin: center;
+    transition: transform 0.8s ease-out;
+}
+
+/* Send */
+.send-btn, .redo-btn, .another-btn {
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: opacity 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.send-btn {
+    width: 100%;
+    max-width: 280px;
+    padding: 1rem 1.5rem;
+    background: #8a1a1a;
+    color: #f0d0d0;
+    border: none;
+    border-radius: 2px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.send-btn:hover:not(:disabled) { background: #a02020; }
+.send-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+.redo-btn, .another-btn {
+    background: none;
+    border: none;
+    color: #555;
+    font-size: 0.7rem;
+    padding: 0.5rem;
+}
+.redo-btn:hover, .another-btn:hover { color: #888; }
+
+/* Result */
+.result-label {
+    color: #555;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
+}
+
+#link-out {
+    width: 100%;
+    background: transparent;
+    border: 1px solid #3a1a1a;
+    border-radius: 2px;
+    padding: 0.75rem;
+    color: #bbb;
+    font-size: 16px;
+    font-family: 'Space Mono', monospace;
+    letter-spacing: 0.05em;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.link-actions {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0 1.5rem;
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.link-actions button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    background: #8a1a1a;
+    color: #f0d0d0;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.link-actions button:hover { background: #a02020; }
+
+.warning {
+    color: #444;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 1.5rem;
+}
+
+/* Footer */
+footer {
+    margin-top: 3rem;
+    color: #2a2a2a;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+footer a {
+    color: #444;
+    text-decoration: none;
+    border-bottom: 1px solid #222;
+}
+footer a:hover { color: #666; border-color: #444; }
+
+/* Mobile */
+@media (max-width: 480px) {
+    .container { padding: 1.5rem 1rem; }
+    h1 { font-size: 2rem; }
+    .send-btn, #link-out { font-size: 16px; }
+}
