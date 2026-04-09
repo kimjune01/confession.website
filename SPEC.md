@@ -29,35 +29,20 @@ Never deleted individually; erased by DDB TTL alongside the rest of
 the slug.
 
 ```
-PK              = slug#<id>
-SK              = NODE#<zero-padded seq, width 6>
-seq             : int
-audio_s3_key    : string | absent      — e.g. audio/<slug_id>/<16-hex>.opus
-text            : string | absent      — ≤ 280 chars
-created_at      : ISO8601
-burned          : bool                 — content has been stubbed
-reveal_in_flight: bool                 — reveal lock; seq-scoped by schema placement
-reveal_deadline : int (epoch) | absent — lease expiry
-reveal_nonce    : bytes | absent       — lease owner; 16B random minted on acquire
-msg_id          : string               — 16B client-generated hex; dedup + idempotency
-expires_at      : int (epoch)          — same as META.expires_at; DDB TTL attribute
+PK           = slug#<id>
+SK           = NODE#<zero-padded seq, width 6>
+seq          : int
+audio_s3_key : string | absent      — e.g. audio/<slug_id>/<16-hex>.opus
+text         : string | absent      — ≤ 280 chars
+created_at   : ISO8601
+burned       : bool                 — content has been stubbed
+expires_at   : int (epoch)          — same as META.expires_at; DDB TTL attribute
 ```
 
-Field hygiene on burn:
-
-- `text` is `REMOVE`'d in the burn transaction. Absence is the
-  invariant.
-- `audio_s3_key` is `REMOVE`'d in the burn transaction. The reveal
-  Lambda holds the key in memory through the synchronous S3
-  `DeleteObject` that follows the burn commit.
-- `reveal_nonce` and `reveal_deadline` are `REMOVE`'d in the burn
-  transaction along with `reveal_in_flight = false`.
-
-`msg_id` is **client-generated** (16 random bytes, hex-encoded,
-lowercase). The server stores it verbatim. It serves two purposes:
-(1) opaque push dedup token in the fan-out payload; (2) idempotency
-key for the compose retry path. See [Idempotency](#idempotency-via-msg_id)
-below.
+Field hygiene on burn: `text` and `audio_s3_key` are `REMOVE`'d in
+the burn transaction. The reveal Lambda holds `audio_s3_key` in
+memory through the synchronous S3 `DeleteObject` that follows the
+burn commit. Absence of the content fields is the invariant.
 
 **SUB** — web push subscription. Plural per slug.
 
@@ -90,7 +75,10 @@ Items past TTL but not yet deleted look identical to absent items.
 `expires_at > :now` on META. An expired slug fails every mutation.
 
 - **First-turn compose** — one `TransactWriteItems`:
-  - `Put META`, cond `attribute_not_exists(PK)`. Collision → 409.
+  - `Put META`, cond `attribute_not_exists(PK)`. Collision → retry
+    with a fresh auto-generated slug (see
+    [first-turn compose](#post-apicompose)), or return 409 if the
+    slug was user-specified.
   - `Put NODE#000001` (no condition — first ever node in this slug).
 - **Rally compose (token-gated)** — one `TransactWriteItems`:
   - `Put NODE#<token.seq+1>`, cond `attribute_not_exists(SK)`.
@@ -98,84 +86,56 @@ Items past TTL but not yet deleted look identical to absent items.
     AND terminal = false AND expires_at > :now`; set
     `tail_seq = :token_seq+1, tail_burned = false`. The `tail_seq`
     match is the replay guard.
-- **Reveal — acquire lock** — one `UpdateItem` on NODE#<tail_seq>:
-  - Cond `burned = false AND (attribute_not_exists(reveal_in_flight)
-    OR reveal_in_flight = false OR reveal_deadline < :now)`.
-  - Set `reveal_in_flight = true, reveal_deadline = :lambda_budget_end,
-    reveal_nonce = :fresh_nonce` (16B random minted for this
-    invocation).
-  - `ReturnValues = ALL_NEW` so the Lambda reads back `audio_s3_key`,
-    `text`, `msg_id`.
-  - The nonce travels in Lambda memory through steps 2–3.
 - **Reveal — commit burn** — one `TransactWriteItems`:
-  - `Update NODE#<seq>`, cond `reveal_in_flight = true AND
-    reveal_nonce = :fresh_nonce AND burned = false`; set
-    `burned = true, reveal_in_flight = false`;
-    `REMOVE text, audio_s3_key, reveal_nonce, reveal_deadline`.
-    The Lambda holds `audio_s3_key` in memory for the synchronous
-    S3 delete that follows this transaction.
+  - `Update NODE#<seq>`, cond `burned = false`; set `burned = true`;
+    `REMOVE text, audio_s3_key`. The Lambda holds `audio_s3_key`
+    in memory for the synchronous S3 delete that follows this
+    transaction.
   - `Update META`, cond `tail_seq = :seq AND tail_burned = false AND
     expires_at > :now`; set `tail_burned = true,
     terminal = :was_text_only`.
 
-The nonce is what makes the two-step a real lease: if Lambda A
-stalls past `reveal_deadline` and Lambda B re-acquires (minting its
-own `:fresh_nonce`), B's `Set` overwrites `reveal_nonce`. A's
-delayed commit fails its own nonce check and is rejected. Minutes-
-scale timing; don't over-tune the deadline.
-
-Consume is idempotent within the lock window: a crashed Lambda
-leaves `reveal_in_flight = true` with a past `reveal_deadline`. A
-retry's acquire-lock step succeeds via the `reveal_deadline < :now`
-branch, mints a fresh nonce, and proceeds from step 2. Any zombie
-commit from the crashed Lambda fails the nonce check.
+The reveal path reads META and NODE sequentially before the
+transaction (to know `tail_seq` and `audio_s3_key`) and before the
+S3 read. Two GetItems + one GetObject + one TransactWriteItems +
+one DeleteObject. No lease, no nonce, no in-flight field — racing
+reveals simply contend on the NODE burn condition, one wins, the
+other returns 404. The loser discards any bytes it already read.
 
 ### Client — per-browser `localStorage`
 
-One browser holds state for at most one slug at a time.
+Per-slug state. A browser can hold state for any number of slugs
+concurrently — no one-alive invariant. Each slug's record is
+independent.
 
 ```
-active_slug : {
-  slug_id    : string,
-  role       : "creator" | "consumer",
-  created_at : ISO8601
+slugs : {
+  "<slug_id>": {
+    role             : "creator" | "consumer",
+    created_at       : ISO8601,
+    reply_capability : {               — present iff last reveal was non-terminal
+      token     : string,              — reply_token from reveal response
+      reveal_at : int (epoch)          — client time; drives UI countdown
+    } | null
+  },
+  ...
 }
-reply_capability : {                — present iff last reveal was non-terminal
-  slug_id   : string,               — gates compose on slug match
-  token     : string,               — reply_token from reveal response
-  reveal_at : int (epoch)           — client time; drives UI countdown
-} | null
-local_messages : [                  — self-push dedup + compose idempotency
-  {
-    msg_id     : string,            — 16B hex, client-generated at send time
-    slug_id    : string,            — scopes lookup to this slug
-    created_at : ISO8601,
-    status     : "pending" | "confirmed" | "lost"
-  }
-]
 ```
 
-- `active_slug` prevents starting a new confession while an existing
-  one is alive. Starting a new one from the landing page while
-  `active_slug` is set redirects to the existing slug. User waits
-  for expiry or manually clears storage to abandon.
-- `reply_capability` is set on successful reveal (non-terminal) and
-  cleared on successful rally-compose **or** on countdown expiry
-  (`reveal_at + SUBMIT_DEADLINE < :now`). Compose is blocked unless
-  `reply_capability.slug_id` matches the slug being composed into.
-- `local_messages` holds `msg_id`s of messages this browser has
-  composed. Entry is added with `status = "pending"` **immediately
-  before** the compose POST fires — this closes the self-push race
-  where a server-side push fanout arrives before the client stores
-  its own msg_id. On 201 → `"confirmed"`. On 400/404 →
-  `"lost"` (kept long enough for dedup GC, then dropped).
-- The service worker, on Web Push receipt, looks up the incoming
-  `msg_id` in `local_messages`. Any non-absent status (`pending`,
-  `confirmed`, `lost`) suppresses the notification — if this
-  browser ever tried to compose that message, it's not a new
-  message from the other party.
-- Clearing `localStorage` abandons the slug permanently from this
-  browser's perspective. The server has no way to reconnect.
+- A slug record is created on successful first-turn compose
+  (`role = "creator"`) or successful reveal (`role = "consumer"`).
+  Multiple slugs can coexist — the user is free to open new
+  confessions while others are still alive.
+- `reply_capability` is set on successful reveal (non-terminal)
+  and cleared on successful rally-compose **or** on countdown
+  expiry (`reveal_at + SUBMIT_DEADLINE < :now`). The enclosing
+  `slugs` key already scopes the capability to the right slug.
+- A slug record is pruned by the UI when `reveal_at +
+  SUBMIT_DEADLINE < :now` (no live reply window), or when the
+  user explicitly clears history. Stale records are harmless but
+  take up space.
+- Clearing `localStorage` abandons all slugs from this browser's
+  perspective. The server has no way to reconnect.
 
 ### Slug canonicalization
 
@@ -201,7 +161,6 @@ free), never on the wire.
 - `audio_mime` must be `audio/ogg; codecs=opus` or
   `audio/webm; codecs=opus`. Anything else is 400.
 - `text` ≤ 280 chars (UTF-8, post-NFC normalization at parse).
-- `msg_id` is exactly 32 lowercase hex characters (16 bytes).
 - `reply_token` base64url decodes to exactly 36 bytes
   (4 seq + 8 exp + 8 slug_exp + 16 hmac). Non-canonical base64url
   is rejected.
@@ -238,39 +197,39 @@ response 200:
   }
 
 response 404: any other state (never-existed, burned-empty,
-              terminated, expired, already-in-flight, race lost)
+              terminated, expired, race lost)
 ```
 
 **Sequence:**
 
-1. **Acquire lock** on `NODE#<tail_seq>`. Mint `:fresh_nonce` for
-   this Lambda invocation. Issue `UpdateItem` with
-   `ReturnValues = ALL_NEW` to read back the NODE state (audio key,
-   text, msg_id, seq) plus META's `expires_at` (via a separate
-   `GetItem` on META or fold it into the ALL_NEW return if the
-   Lambda is batching). On condition failure: 404.
-2. **Read audio** from S3 if `audio_s3_key` present. On failure:
-   best-effort clear `reveal_in_flight` (conditional on the same
-   nonce), return 404.
-3. **Commit burn** via `TransactWriteItems` as described above,
-   carrying `:fresh_nonce` in the NODE condition. On failure:
-   return 404. **Do not return content, do not delete S3.**
-4. **Sync `DeleteObject` S3** using the in-memory `audio_s3_key`.
+1. **Read META** via `GetItem`. Verify `expires_at > :now`,
+   `tail_burned = false`, `terminal = false`. On any failure: 404.
+   Extract `tail_seq` and `expires_at`.
+2. **Read NODE#<tail_seq>** via `GetItem`. Verify
+   `burned = false`. Extract `audio_s3_key` and `text`. On failure:
+   404.
+3. **Read audio** from S3 if `audio_s3_key` present. On failure:
+   return 404. (No state to clean up — no writes yet.)
+4. **Commit burn** via `TransactWriteItems` as described above.
+   On `ConditionalCheckFailed`: return 404. **Do not return content,
+   do not delete S3** — someone else won the race, and the bytes
+   in memory are not ours to hand out.
+5. **Sync `DeleteObject` S3** using the in-memory `audio_s3_key`.
    On failure: log content-free, continue. S3 lifecycle catches
    orphans within 8 days.
-5. **Mint `reply_token`** — see [Reply token format](#reply-token-format).
+6. **Mint `reply_token`** — see [Reply token format](#reply-token-format).
    `null` if the burn set `terminal = true`.
-6. **Return body** containing content bytes (as base64) and token.
+7. **Return body** containing content bytes (as base64) and token.
 
 **At-most-once delivery, sharpened.** If the burn transaction in
-step 3 commits but the response never reaches the client (disconnect,
-crash, proxy hang), the message is burned unread *and* no
-`reply_token` was delivered. The slug is immediately dead: nothing to
-reveal (content stubbed), no token to compose (never received). The
-1-week sweep eventually erases the husk. This is not a bug — it is
-the cost of burn guarantees. The medium trades delivery certainty
-for burn certainty. Aligned with "bravery deserves closure, not
-extraction" in DESIGN.md.
+step 4 commits but the response never reaches the client
+(disconnect, crash, proxy hang), the message is burned unread *and*
+no `reply_token` was delivered. The slug is immediately dead:
+nothing to reveal (content stubbed), no token to compose (never
+received). DDB TTL eventually erases the husk. This is the cost of
+burn guarantees — the medium trades delivery certainty for burn
+certainty. Aligned with "bravery deserves closure, not extraction"
+in DESIGN.md.
 
 ### `POST /api/slug/<id>/compose`
 
@@ -280,18 +239,15 @@ Rally-compose. Token-gated. Distinct endpoint from first-turn compose.
 request:
   {
     reply_token : string,
-    msg_id      : string,          — 32 hex chars; client-generated
     audio_b64   : string | null,
     text        : string | null    — ≤ 280 chars
   }
   At least one of audio_b64 or text required.
 
 response 201: { }
-response 400: token invalid, token expired, no content, text too long,
-              msg_id malformed
-response 404: slug state rejects this token and the NODE at
-              token.seq+1 does not match this msg_id (state moved on,
-              slug expired, real collision)
+response 400: token invalid, token expired, no content, text too long
+response 404: slug state rejects this token (state moved on, slug
+              expired, tail already advanced)
 ```
 
 **Sequence:**
@@ -301,13 +257,12 @@ response 404: slug state rejects this token and the NODE at
 2. **Upload audio** (if present) to S3 at a fresh key
    `audio/<slug_id>/<16-hex>.opus`. Keep the key in Lambda memory.
 3. **Write** via `TransactWriteItems` (the `Put NODE` sets
-   `msg_id`, `audio_s3_key`, `text`, and `expires_at = token.slug_exp`
-   — same TTL as META).
+   `audio_s3_key`, `text`, and `expires_at = token.slug_exp` —
+   same TTL as META).
 4. **On success:** 201 `{ }`, then fan out push to all `SUB#...`
-   items for this slug, payload `{ msg_id }`. Return.
-5. **On `ConditionalCheckFailed`:** run the idempotency handler —
-   see [Idempotency via msg_id](#idempotency-via-msg_id). Either
-   returns 201 (matching retry) or 404 (real state drift).
+   items for this slug, payload `{ }`. Return.
+5. **On `ConditionalCheckFailed`:** return 404. The tail has
+   advanced, the slug expired, or state drifted. No retry shelter.
 
 No DynamoDB read on the hot path before the write — the signed
 token carries everything the write needs: tail seq, slug TTL, and
@@ -317,64 +272,72 @@ the HMAC that proves both came from the same reveal.
 the *next* state (text-only → next consume sets `terminal = true`),
 not whether the token is valid.
 
-### `POST /api/slug/<id>`
+**Not idempotent.** A transient proxy failure that hides a
+successful server commit will show up as a 404 on retry. The
+message still landed; the sender sees "turn lost" but the
+confession reached the other party. At 5-min fuse with a rare
+failure mode, the cost of shelter (a GetItem on every compose
+attempt + a client-generated idempotency key) was larger than the
+occasional confused composer. Debounce at the UI layer; don't
+retry on unknown results.
 
-First-turn compose. Creates the slug.
+### `POST /api/compose`
+
+First-turn compose. Creates the slug. Slug is server-generated by
+default; the client can optionally request a specific slug.
 
 ```
 request:
   {
-    msg_id    : string,           — 32 hex chars; client-generated
     audio_b64 : string | null,
-    text      : string | null     — ≤ 280 chars
+    text      : string | null,    — ≤ 280 chars
+    slug      : string | null     — optional; validated against slug
+                                    canonicalization if present
   }
 
-response 201: { }
-response 400: no content, text too long, msg_id malformed
-response 409: real slug collision (NODE#000001 msg_id does not match)
+response 201:
+  {
+    slug : string,                 — the final slug (server-generated or echoed)
+    url  : string                  — "https://confession.website/<slug>"
+  }
+response 400: no content, text too long, slug malformed
+response 409: user-specified slug already taken (retry with a
+              different name, or omit `slug` to let the server pick)
 ```
 
 **Sequence:**
 
-1. **Validate** content, sizes, msg_id format.
-2. **Upload audio** (if present) to S3 at `audio/<slug_id>/<16-hex>.opus`.
+1. **Validate** content, sizes. Validate `slug` if provided.
+2. **Upload audio** (if present) to S3 at
+   `audio/<slug_candidate>/<16-hex>.opus`. If the slug is
+   server-generated, use the first candidate's name for the upload
+   path; retries on DDB collision reuse the same S3 key (the object
+   is overwritten or re-keyed, implementer's choice).
 3. Compute `:expires = :now + 7 days`.
 4. **Write** via `TransactWriteItems` creating META (`tail_seq=1,
    tail_burned=false, terminal=false, created_at=:now,
-   expires_at=:expires`) and NODE#000001 (with request's `msg_id`,
-   `audio_s3_key`, `text`, `expires_at=:expires`).
-   `attribute_not_exists(PK)` on the META Put is the collision guard.
-5. **On success:** 201 `{ }`.
-6. **On `ConditionalCheckFailed`:** run the idempotency handler —
-   see below. Either returns 201 (matching retry) or 409 (real
-   collision).
+   expires_at=:expires`) and NODE#000001 (with `audio_s3_key`,
+   `text`, `expires_at=:expires`). `attribute_not_exists(PK)` on
+   the META Put is the collision guard.
+5. **On success:** 201 with the final slug and shareable URL.
+6. **On `ConditionalCheckFailed`:**
+   - If `slug` was user-specified: return 409. Client prompts for
+     a different name.
+   - If `slug` was server-generated: mint a new candidate and
+     retry, up to 5 attempts. After 5 collisions, return 500.
+     (Collision probability with a 1000-word list and `<word>-<word>`
+     format is ~1 in 10⁶ per attempt; 5 tries is astronomical.)
 
-First-turn composer does not receive a `reply_token` — they have no
-reveal to derive one from. To send a second message, they must wait
-for (or provoke) a reply, consume it, and compose within the window.
+First-turn composer does not receive a `reply_token` — they have
+no reveal to derive one from. To send a second message, they must
+wait for (or provoke) a reply, consume it, and compose within the
+window.
 
-### Idempotency via msg_id
-
-The `msg_id` is a client-generated 16B random, meant to survive
-retries through transient proxy failures where a successful server-
-side commit is masked by a lost response. On the `ConditionalCheckFailed`
-branch of any compose endpoint:
-
-1. `GetItem` on `NODE#<target_seq>` (for rally-compose,
-   `target_seq = token.seq + 1`; for first-turn,
-   `target_seq = 000001`).
-2. If the item exists and its `msg_id` matches the request's: return
-   201 `{ }`. This is an idempotent retry of a successful compose —
-   do **not** re-fire push fan-out (the original attempt already did,
-   or tried to).
-3. Otherwise: return the state-appropriate failure (404 for
-   rally-compose, 409 for first-turn).
-
-This is the only DDB read on the compose path, and it only runs when
-the write conditionally fails. Hot-path compose is still write-only.
-
-The collision probability for 16B random msg_ids is negligible at
-any realistic volume; treat a match as proof of retry, not accident.
+**Slug generation.** The server picks from a curated wordlist of
+~1000 common English words (ember, lantern, whisper, anchor,
+quiet, signal, etc.), producing `<adjective>-<noun>` format (e.g.,
+`quiet-lantern`, `amber-signal`). Short, memorable, napkin-
+writable. Actual wordlist is an implementation detail.
 
 ### `POST /api/slug/<id>/subscribe`
 
@@ -523,27 +486,24 @@ from the user's perspective.
 ### First turn — compose
 
 1. Arrive at `confession.website/` (no slug). Landing copy.
-2. (Optional) Record audio. Tap to start. Stop locked for first 6s.
-   Auto-stops at `RECORD_TIMER`.
+2. (Optional) Record audio. Tap to start. Auto-stops at
+   `RECORD_TIMER`. Re-recording discards and starts fresh.
 3. (Optional) Listen back. (Optional) Re-record.
 4. (Optional) Type text, ≤ 280 chars.
 5. At least one of audio or text required. Send disabled until then.
-6. Pick a slug name. Short, writable on a napkin.
-7. Tap send. Single button. Label carries the rule:
+6. Tap send. Single button. Label carries the rule:
    - Audio present → *send (keeps the rally)*
    - Text only → *send (ends the channel)*
-8. **Before POST**, generate `msg_id` (16 random bytes → 32 hex)
-   and append to `local_messages` with `status = "pending"` and
-   `slug_id = <the slug name>`.
-9. `POST /api/slug/<id>` with `{msg_id, audio_b64?, text?}`. On 201:
-   flip `local_messages[msg_id].status = "confirmed"`, set
-   `active_slug`, show URL + share affordance. On 409: flip to
-   `"lost"` and prompt for a new slug name. On transport failure
-   (unknown outcome): retry POST with the same `msg_id` — if the
-   original landed, the server recognizes the msg_id and returns
-   201; if not, the retry succeeds fresh.
-10. (Optional) Push opt-in after send: single button *notify you
-    when the next message arrives?* Tap triggers Web Push permission
+7. `POST /api/compose` with `{audio_b64?, text?}`. No slug in the
+   body — server generates.
+8. On 201: server returns `{slug, url}`. Client stores a record
+   under `slugs["<slug>"] = {role: "creator", created_at: now,
+   reply_capability: null}`. Show the URL + share affordance.
+9. (Optional before step 7) **Customize the slug.** A small
+   "customize URL" affordance lets the user propose their own
+   name. If taken, server returns 409; client prompts for another.
+10. (Optional after step 8) Push opt-in: single button *notify
+    you when a reply arrives?* Tap triggers Web Push permission
     prompt, then `POST /api/slug/<id>/subscribe`.
 
 ### Subsequent turn — consume
@@ -559,9 +519,9 @@ from the user's perspective.
    - Display text (if present).
    - If `terminated = true`: transition inline to "this channel is
      done" state. No compose surface.
-   - Else: set `localStorage.reply_capability =
-     {slug_id, token, reveal_at: now}`. Transition inline to
-     rally-compose surface with `RESPONSE_FUSE` countdown.
+   - Else: write `slugs["<slug>"] = {role: "consumer", created_at:
+     now, reply_capability: {token, reveal_at: now}}`. Transition
+     inline to rally-compose surface with `RESPONSE_FUSE` countdown.
 6. On 404: transition to 404 view. The race was lost (someone else
    revealed first, or the slug moved on).
 
@@ -576,18 +536,12 @@ There is no dedicated URL, no route, no landing surface.
 3. (Optional) Type text, ≤ 280 chars.
 4. Send active for all of `t < SUBMIT_DEADLINE`; overtime UI in
    `RESPONSE_FUSE ≤ t < SUBMIT_DEADLINE`.
-5. **Before POST**, verify `reply_capability.slug_id` matches the
-   current slug; if not, bail. Generate `msg_id` and append to
-   `local_messages` with `status = "pending"` and `slug_id`.
-6. Tap send → `POST /api/slug/<id>/compose` with
-   `{reply_token: reply_capability.token, msg_id, audio_b64?, text?}`.
-7. On 201: flip `local_messages[msg_id].status = "confirmed"`,
-   clear `reply_capability`, show "sent" confirmation, transition
-   to 404 view.
-8. On 400 / 404: flip to `"lost"`, clear `reply_capability`,
-   transition to 404 view. The turn is lost. (The server's
-   idempotency handler means a 201 is still possible on retry if
-   the original actually landed.)
+5. Tap send → `POST /api/slug/<id>/compose` with
+   `{reply_token: slugs[slug].reply_capability.token, audio_b64?, text?}`.
+6. On 201: clear `slugs[slug].reply_capability`, show "sent"
+   confirmation, transition to 404 view.
+7. On 400 / 404: clear `reply_capability`, transition to 404 view.
+   The turn is lost.
 
 If the user never taps send: at `t = SUBMIT_DEADLINE` the UI
 auto-collapses to 404. `reply_capability` is cleared. Turn lost.
@@ -600,19 +554,18 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
   manual check only.
 - **One trigger: new pending message.** Push fires when a compose
   completes. Consumes fire no push.
-- **Payload is opaque.** Body: `{ msg_id: "<hex>" }`. No slug, no
-  preview, no timestamp, no content, no exchange metadata. The
-  `msg_id` is the 16B client-generated random from the composer's
-  POST; unique and uncorrelatable across slugs.
-- **Self-push dedup is client-side.** The service worker matches
-  incoming `msg_id` against `local_messages` in localStorage. Any
-  non-absent entry (pending, confirmed, or lost) suppresses display.
-  The "pending before POST" rule closes the race where a server
-  fan-out reaches the subscribed browser before the compose response:
-  the msg_id is already in local_messages by the time the push
-  arrives, because the client wrote it there before firing the POST.
-  Push still fires server-side; the subscribed browser just doesn't
-  surface it.
+- **Payload is empty.** Body: `{ }`. The fan-out carries no slug,
+  no preview, no timestamp, no content, no exchange metadata, no
+  dedup token. The push itself is the whole signal — "something
+  happened, come look."
+- **Self-push dedup via focused-tab check.** The service worker,
+  on push receipt, calls `clients.matchAll({type: 'window'})` and
+  skips notification display if any client window is focused on
+  the confession.website origin. The composer just posted from a
+  focused tab, so their own push is suppressed. Edge case: if the
+  composer closes their tab immediately after sending, the SW sees
+  no focused client and the notification fires. Minor annoyance,
+  rare, not worth the complexity of explicit dedup.
 - **Plurality.** Up to 4 `SUB#` items per slug. Phone + laptop on
   each side of a rally is fine. Subscribes past 4 evict the oldest.
 - **Web Push only.** No email, no SMS, no account-bound push.
@@ -728,8 +681,19 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
   application-level background process. Cleanup is handled by DDB
   TTL and S3 lifecycle — infrastructure, not code.
 - GSIs. The primary table's PK/SK covers every access pattern.
-  Neither the sweeper nor the reaper exists, so nothing needs
-  secondary indexing.
+- A one-slug-per-browser invariant. Clients hold state for any
+  number of concurrent slugs. Multiple confessions in flight is a
+  legitimate use case.
+- Reveal leases, acquire-lock steps, or lock nonces. Reveal is a
+  straight read-read-read-write sequence; racing reveals contend
+  on a single conditional burn.
+- Compose idempotency via client-generated dedup keys. Transient
+  hidden-success retries surface as "turn lost" — the confession
+  still landed, the composer sees a rare 404.
+- Push payload dedup tokens (`msg_id`). The SW uses focused-tab
+  detection for self-push suppression. Push payload is empty.
+- A minimum audio duration floor. A 2-second "I'm sorry." is a
+  valid confession; the UI does not reject it.
 - Content, slug IDs, or reply text in any log, metric, or trace.
 - Retained access logs, behavioral analytics, or visitor tracking.
 - Anything a subpoena or takedown notice could usefully request.

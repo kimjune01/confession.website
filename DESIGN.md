@@ -109,9 +109,10 @@ unreachable.
 
 ## The medium
 
-**A message is audio and/or text.** Voice (6-second floor, 2-minute
-ceiling) and/or text (≤280 chars). At least one required. Both burn
-together on consume.
+**A message is audio and/or text.** Voice (up to 2-minute ceiling)
+and/or text (≤280 chars). At least one required. Both burn together
+on consume. No minimum duration — a two-second *"I'm sorry."* is a
+valid confession.
 
 **Conversation tennis.** After the first message, the slug is a
 turn-based exchange. Audio keeps the rally going. **Text-only
