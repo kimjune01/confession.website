@@ -3,51 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>confession</title>
+    <title>confession.website</title>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>confession</h1>
-        <p class="subtitle">tell it once, then let it go.</p>
-
-        <div id="view-record" class="view">
-            <button id="record-btn" class="record-btn" aria-label="Record">
-                <span id="record-icon" class="record-icon"></span>
-            </button>
-            <p id="record-time" class="record-time" hidden>0:00</p>
-        </div>
-
-        <div id="view-send" class="view" hidden>
-            <button id="send-btn" class="send-btn">confess</button>
-            <button id="redo-btn" class="redo-btn">record again</button>
-        </div>
-
-        <div id="view-sent" class="view" hidden>
-            <p class="result-label">share this confession</p>
-            <input type="text" id="link-out" readonly>
-            <div class="link-actions">
-                <button id="copy-btn" aria-label="Copy link">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                    </svg>
-                </button>
-                <button id="share-btn" class="share-btn" aria-label="Share link" hidden>
-                    <svg width="18" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
-                        <polyline points="16 6 12 2 8 6"/>
-                        <line x1="12" y1="2" x2="12" y2="15"/>
-                    </svg>
-                </button>
-            </div>
-            <p class="warning">this link works once. after the listener hears it, it's gone.</p>
-            <button id="another-btn" class="another-btn">confess again</button>
-        </div>
-
-        <footer>so i made this website &middot; <a href="https://ephemeral.website" target="_blank" rel="noopener">ephemeral</a></footer>
+    <div class="site-shell">
+        <main id="app" class="app" aria-live="polite"></main>
     </div>
 
-    <script src="/script.js"></script>
+    <template id="tpl-frame">
+        <section class="surface fade-in">
+            <header class="brand-block">
+                <p class="brand-mark">confession.website</p>
+                <h1 class="headline"></h1>
+                <p class="rules"></p>
+            </header>
+            <div class="surface-body"></div>
+            <footer class="footer-note">no audience. no masking. the rules stay visible.</footer>
+        </section>
+    </template>
+
+    <template id="tpl-compose">
+        <section class="compose-card">
+            <div class="compose-status" hidden></div>
+            <div class="countdown-card" hidden>
+                <p class="countdown-phase"></p>
+                <p class="countdown-time"></p>
+            </div>
+            <div class="record-stack">
+                <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
+                    <span class="record-icon"></span>
+                </button>
+                <p class="record-time" hidden>0:00</p>
+                <p class="record-caption"></p>
+            </div>
+            <div class="audio-preview" hidden>
+                <audio controls preload="metadata"></audio>
+                <button type="button" class="ghost-btn" data-action="clear-audio">remove audio</button>
+            </div>
+            <label class="field-label" for="compose-text">or type</label>
+            <textarea id="compose-text" class="compose-text" rows="6" maxlength="280" data-field="text"></textarea>
+            <details class="slug-disclosure">
+                <summary>customize URL</summary>
+                <label class="field-label" for="compose-slug">slug</label>
+                <input id="compose-slug" class="slug-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" data-field="slug">
+            </details>
+            <div class="compose-actions">
+                <button type="button" class="send-btn" data-action="send"></button>
+            </div>
+        </section>
+    </template>
+
+    <template id="tpl-listen-ready">
+        <section class="notice-card">
+            <button type="button" class="send-btn" data-action="listen">listen</button>
+        </section>
+    </template>
+
+    <template id="tpl-content">
+        <section class="content-card">
+            <div class="played-audio" hidden>
+                <audio controls preload="metadata"></audio>
+            </div>
+            <p class="message-text" hidden></p>
+        </section>
+    </template>
+
+    <template id="tpl-link-card">
+        <section class="link-card">
+            <p class="result-label">share this URL</p>
+            <input class="link-out" type="text" readonly>
+            <div class="link-actions">
+                <button type="button" class="send-btn compact" data-action="copy-link">copy</button>
+                <button type="button" class="ghost-btn compact" data-action="share-link">share</button>
+            </div>
+            <p class="inline-note">the URL is the credential. if it is heard, the pending turn burns.</p>
+            <div class="push-prompt" hidden>
+                <p class="push-copy"></p>
+                <div class="push-actions">
+                    <button type="button" class="send-btn compact" data-action="push-yes">yes</button>
+                    <button type="button" class="ghost-btn compact" data-action="push-no">no</button>
+                </div>
+            </div>
+            <div class="compose-actions">
+                <button type="button" class="ghost-btn" data-action="new-confession">start again</button>
+            </div>
+        </section>
+    </template>
+
+    <template id="tpl-rally-sent">
+        <section class="notice-card">
+            <p class="sent-tick">tick.</p>
+            <p class="inline-note"></p>
+            <div class="push-prompt" hidden>
+                <p class="push-copy"></p>
+                <div class="push-actions">
+                    <button type="button" class="send-btn compact" data-action="push-yes">yes</button>
+                    <button type="button" class="ghost-btn compact" data-action="push-no">no</button>
+                </div>
+            </div>
+        </section>
+    </template>
+
+    <template id="tpl-empty">
+        <section class="notice-card">
+            <p class="inline-note"></p>
+            <div class="compose-actions">
+                <button type="button" class="ghost-btn" data-action="dismiss">dismiss</button>
+            </div>
+        </section>
+    </template>
+
+    <script type="module" src="/app.js"></script>
 </body>
 </html>
