@@ -35,11 +35,12 @@ unreachable.
   revisiting the link. Closure is observable by pull, not delivered
   by push. The 404 is the receipt.
 - **Reciprocity has a fuse.** Rally-compose lives in a 5-minute
-  window opened by reveal, with a 2-minute grace for in-progress
-  recording. The fuse burns on engagement, not on URL-holding —
-  the capability to reply is minted fresh at each reveal and
-  expires with the window. Decay is part of the gesture: a reply
-  that comes an hour later isn't the same reply.
+  window that opens when the recipient listens, with a 2-minute
+  grace for in-progress recording. The fuse burns on engagement,
+  not on URL-holding — the capability to reply is minted fresh
+  each time someone listens and expires with the window. Decay
+  is part of the gesture: a reply that comes an hour later isn't
+  the same reply.
 - **The URL is the whole credential, fragment included.** During
   the reply window the URL carries a short-lived reply token in
   its hash fragment. Copying the URL between your own devices to
@@ -128,11 +129,11 @@ unlimited within the window.
 holds the slug has the slug's privileges. The link doesn't
 discriminate, it just serves.
 
-**Footguns are accepted.** Anyone with the URL can consume. First-turn
+**Footguns are accepted.** Anyone with the URL can listen. First-turn
 compose is also URL-gated — any fresh slug name is available to any
-visitor. Rally-compose is not: it requires a reply token minted at
-reveal. Visiting your own link can burn your own messages. The cost
-of the no-discrimination principle.
+visitor. Rally-compose is not: it requires a reply code minted when
+someone listens. Visiting your own link can burn your own messages.
+The cost of the no-discrimination principle.
 
 **Contact handoff is an exit door.** If a message's text contains a
 phone number or handle, the receiver can leave for a persistent
@@ -150,20 +151,20 @@ Drafts below — shape fixed, words need another pass.
 
 **Slug with pending message:**
 > *a message is waiting.*
-> *revealing plays the audio and shows the text once. both burn together.*
-> [reveal]
+> *listening plays the audio and shows the text once. both burn together.*
+> [listen]
 
-**Post-reveal, inline (non-terminal).** After reveal, the same page
-shows the content and, below it, the compose surface with a countdown.
-The rally-compose UI is not a separate route; it lives in the reveal
-response page.
+**Post-listen, inline (non-terminal).** After the listener taps,
+the same page shows the content and, below it, the compose surface
+with a countdown. The rally-compose UI is not a separate route;
+it lives in the same page as the listen response.
 > *your turn.*
 > *audio keeps the rally going. text ends the channel.*
 > [record] [or type]
 > (5:00 countdown; 5:00–7:00 overtime with obvious animation; hard
 > stop at 7:00)
 
-**Post-reveal, inline (terminal, text-only message):** same page
+**Post-listen, inline (terminal, text-only message):** same page
 shows the content, then:
 > *this channel is done.*
 

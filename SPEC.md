@@ -13,7 +13,7 @@ DynamoDB TTL on `expires_at` handles all cleanup.
 
 **META** — one item per slug. Holds the current-tail content
 directly; past turns are not retained. Created on first-turn
-compose, mutated in place on every reveal and rally-compose,
+compose, mutated in place on every listen and rally-compose,
 destroyed by DDB TTL ~48 h after `expires_at`.
 
 ```
@@ -37,7 +37,7 @@ Rally-compose flips burned-empty back to pending by overwriting
 the content fields and advancing `tail_seq`.
 
 `reply_code` is a 4-character crockford base32 string (uppercase
-`0-9 A-Z` minus `I L O U`) generated fresh on every reveal burn.
+`0-9 A-Z` minus `I L O U`) generated fresh on every listen burn.
 It lives on META for at most `SUBMIT_DEADLINE` (7 minutes) and is
 `REMOVE`'d on successful rally-compose. The pointer model
 replaces the earlier signed-token approach — no HMAC, no server
@@ -46,7 +46,7 @@ server remembers for a few minutes."
 
 Field hygiene on burn: the `UpdateItem` REMOVEs
 `tail_audio_s3_key` and `tail_text`, and SETs `reply_code`,
-`reply_code_exp`. The reveal Lambda holds `tail_audio_s3_key` in
+`reply_code_exp`. The listen Lambda holds `tail_audio_s3_key` in
 memory through the synchronous S3 `DeleteObject` that follows the
 burn. Absence of the content fields is the invariant on burned-
 empty slugs.
@@ -103,7 +103,7 @@ its condition expression.
   - The pointer match on `reply_code` is the capability check.
     Because the update `REMOVE`s it on success, a replayed compose
     with the same code fails naturally — the field is absent.
-- **Reveal — burn** — one `UpdateItem` on META:
+- **Listen — burn** — one `UpdateItem` on META:
   - Cond `tail_seq = :seq AND tail_burned = false AND
     expires_at > :now`.
   - Sets `tail_burned = true, terminal = :was_text_only`. If
@@ -112,12 +112,12 @@ its condition expression.
     `REMOVE tail_audio_s3_key, tail_text`.
   - `:fresh_code` is 4 random crockford base32 characters minted
     server-side in this Lambda invocation.
-  - The reveal Lambda keeps `tail_audio_s3_key` in memory for the
+  - The listen Lambda keeps `tail_audio_s3_key` in memory for the
     sync S3 delete that follows.
 
-**Concurrent reveals are allowed to both return content.** The
-reveal path reads META, reads S3, tries to burn. If the burn's
-condition fails, another reveal already burned it — but this
+**Concurrent listens are allowed to both return content.** The
+listen path reads META, reads S3, tries to burn. If the burn's
+condition fails, another listen already burned it — but this
 Lambda has already read the bytes from S3 and can return them to
 its client. Only the burn winner sets a `reply_code` and deletes
 S3; the loser returns content with `reply_code = null`.
@@ -134,7 +134,7 @@ per-slug record, no reply-window state in localStorage. Two
 things are kept:
 
 **1. Reply code — URL fragment, not localStorage.** After a
-successful reveal the client writes the 4-char `reply_code` into
+successful listen the client writes the 4-char `reply_code` into
 the page URL as a hash fragment:
 
 ```
@@ -145,7 +145,7 @@ The fragment survives page refresh, is never sent to the server,
 and never lands in server logs or referer headers. The client
 treats the fragment as an opaque string and ships it verbatim on
 `POST /compose`. The reply window expiration is tracked by the
-reveal response's accompanying `reply_code_exp` timestamp (kept
+listen response's accompanying `reply_code_exp` timestamp (kept
 in JS memory — same countdown model as before, just without a
 signed token to decode).
 
@@ -165,7 +165,7 @@ the capability — the user's choice, same trust model as sharing
 any URL from this site.
 
 **Dictation-friendly.** Four characters is short enough to read
-aloud ("A-four-F-two") over a phone. If the revealing device has
+aloud ("A-four-F-two") over a phone. If the listening device has
 no mic, the user can read the code to the other device, type it
 into the URL bar after the slug name, and reply.
 
@@ -232,7 +232,7 @@ expression — a `GetItem` with a post-read filter. This closes the
 ≤48 h TTL lag window during which an expired META might still exist
 in the table.
 
-### `POST /api/slug/<id>/reveal`
+### `POST /api/slug/<id>/listen`
 
 Atomic burn. Returns content inline. Mints a `reply_code`.
 
@@ -269,17 +269,17 @@ response 404: META absent, tail_burned=true already, terminal=true,
 5. **On burn success:** sync `DeleteObject` S3. Return body with
    content and the `reply_code` / `reply_code_exp` from step 3.
    If terminal, both are `null`.
-6. **On burn failure (`ConditionalCheckFailed`):** another reveal
+6. **On burn failure (`ConditionalCheckFailed`):** another listen
    beat us to it. Return body with content but both
    `reply_code = null` and `reply_code_exp = null`. Do **not**
    call `DeleteObject` — the winner will. The caller sees the
    message; they don't get to rally.
 
-**Concurrent-reveal semantics.** The URL is the credential, and
-whoever has the URL has the slug's privileges. If two browsers
-hit reveal in the same instant, both read the content. Only one
-burn commits; that one gets the rally-compose capability. The
-other sees the message and no more. This is consistent with
+**Concurrent listens.** The URL is the credential, and whoever
+has the URL has the slug's privileges. If two browsers hit the
+listen endpoint in the same instant, both read the content. Only
+one burn commits; that one gets the rally-compose capability.
+The other sees the message and no more. This is consistent with
 URL-as-credential: sharing the URL is sharing the content, full
 stop. Burn serializes the rally state, not content delivery.
 
@@ -386,10 +386,10 @@ response 409: user-specified slug already taken (retry with a
      `<adjective>-<noun>` format is ~1 in 10⁶ per attempt; 5 tries
      is astronomical.)
 
-First-turn composer does not receive a `reply_code` — they have
-no reveal to derive one from. To send a second message, they must
-wait for (or provoke) a reply, consume it, and compose within the
-window.
+First-turn composer does not receive a `reply_code` — they
+haven't listened to anything, so there's no code to derive. To
+send a second message, they must wait for (or provoke) a reply,
+listen to it, and compose within the window.
 
 **Slug generation.** The server picks from a curated wordlist of
 ~1000 common English words (ember, lantern, whisper, anchor,
@@ -428,7 +428,7 @@ reply_code : 4 characters, crockford base32 alphabet
              (0-9, A-Z minus I L O U)
 ```
 
-The code is generated server-side on each reveal burn as 4 random
+The code is generated server-side on each listen burn as 4 random
 characters from the crockford base32 alphabet. Uppercase canonical
 on the wire; the server normalizes to uppercase and strips any
 internal dashes or whitespace before matching, so the client can
@@ -450,7 +450,7 @@ have to:
    slugs exist in pending state.
 2. Catch a specific target slug in its 7-minute reply-window
    state (which is most of the slug's lifetime only if it gets
-   revealed promptly; otherwise the window never opens).
+   listened promptly; otherwise the window never opens).
 3. Brute-force the 4-char code against that slug — ~4% hit
    probability per attempt burst at 100 req/sec.
 4. Compose… a random reply to a stranger's confession. No
@@ -474,7 +474,7 @@ section.
 
 | parameter       | value | definition                                       |
 | --------------- | ----- | ------------------------------------------------ |
-| `RESPONSE_FUSE` | 5:00  | UI countdown from reveal; the visible fuse       |
+| `RESPONSE_FUSE` | 5:00  | UI countdown from the moment of listen; the fuse |
 | `RECORD_TIMER`  | 2:00  | audio recording ceiling (also DESIGN's 2-min cap)|
 
 ```
@@ -488,7 +488,7 @@ recording that starts at `t = RESPONSE_FUSE − ε` needs up to
 ceiling adjusts), `SUBMIT_DEADLINE` moves with it mechanically — no
 independent tuning.
 
-`reply_code_exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`,
+`reply_code_exp = min(listen_time + SUBMIT_DEADLINE, slug.expires_at)`,
 stored on META and checked by the rally-compose condition
 expression. Judged at **request receipt**, not post-upload-
 processing, so a slow upload doesn't penalize a user who
@@ -559,7 +559,7 @@ from the user's perspective.
 8. On 201: server returns `{slug, url}`. Client navigates to
    `confession.website/<slug>` and shows the URL + share
    affordance. No localStorage write — the creator has no reply
-   capability until they reveal an incoming reply.
+   capability until they listen to an incoming reply.
 9. **Push opt-in — only if the message is replyable.** If the
    message carried any audio (even with text), the send was a
    rally-keeper, and the recipient's reply will show up on this
@@ -574,14 +574,14 @@ from the user's perspective.
     own name. If taken, server returns 409; client prompts for
     another.
 
-### Subsequent turn — consume
+### Subsequent turn — listen
 
 1. Arrive at `confession.website/<slug>`.
-2. `GET /api/slug/<id>` fires. 200 → render reveal surface. 404 →
+2. `GET /api/slug/<id>` fires. 200 → render listen surface. 404 →
    render 404 view.
-3. Reveal surface: *a message is waiting.* / *revealing plays the
-   audio and shows the text once. both burn together.* / [reveal]
-4. Tap reveal → `POST /api/slug/<id>/reveal`.
+3. Listen surface: *a message is waiting.* / *listening plays the
+   audio and shows the text once. both burn together.* / [listen]
+4. Tap [listen] → `POST /api/slug/<id>/listen`.
 5. On 200:
    - Play audio (if present) from the base64-decoded body.
    - Display text (if present).
@@ -589,7 +589,7 @@ from the user's perspective.
      is done" state. No compose surface. No fragment written.
    - If `reply_code = null` but not terminated: this Lambda lost
      the burn race. The user sees the content (they earned it by
-     revealing) but no compose surface. Transition to 404 view
+     listening) but no compose surface. Transition to 404 view
      after the content is dismissed.
    - Else: `history.replaceState` to
      `confession.website/<slug>#<reply_code>`. Keep
@@ -600,11 +600,11 @@ from the user's perspective.
 
 ### Subsequent turn — rally compose
 
-Rally-compose lives only as an inline state on the post-reveal
+Rally-compose lives only as an inline state on the post-listen
 page. There is no dedicated URL path, just a fragment on the
 existing slug URL.
 
-1. Post-reveal page shows the just-consumed content *plus* the
+1. Post-listen page shows the just-consumed content *plus* the
    compose surface *plus* the countdown. URL is
    `confession.website/<slug>#<reply_code>`.
 2. (Optional) Record audio. Dynamic duration cap (see above).
@@ -632,20 +632,20 @@ auto-collapses to 404 and cleans the fragment. Turn lost.
 
 **Refresh mid-window:** the fragment is still in the URL; client
 re-hydrates the compose surface. The client has lost the exact
-`reply_code_exp` it knew from the reveal response body (JS memory
+`reply_code_exp` it knew from the listen response body (JS memory
 doesn't survive refresh), so it shows the compose UI without a
 precise countdown — just the "hurry" visual — and relies on the
 server's condition check to reject late submissions. The server
 is authoritative via `reply_code_exp` on META; a POST arriving
 after the window closes gets 404. The normal non-refresh flow
 keeps the precise countdown because `reply_code_exp` is in JS
-memory from the reveal response.
+memory from the listen response.
 
 **Cross-device hand-off:** the user can copy the URL (including
 the fragment) from one device and paste it into another. The
 second device sees the fragment, hydrates the compose surface,
 and can reply within the remaining window. Useful when the
-revealing device can't record (desktop with no mic, borrowed
+listening device can't record (desktop with no mic, borrowed
 laptop, etc.).
 
 ## Notifications
@@ -702,20 +702,20 @@ laptop, etc.).
     under the `audio/` prefix **8 days after creation**. This is
     the 7-day slug ceiling plus a 1-day margin. Audio objects can
     reach this cleanup path in two cases:
-    1. **Slug expired without reveal.** The audio was never
-       listened to. Nobody held the slug's reply token, nobody
-       fetched the object. The lifecycle is the only path that ever
-       removes it.
-    2. **Reveal happened but the sync `DeleteObject` failed.** The
-       audio was consumed and burned in DDB, but the Lambda's
+    1. **Slug expired without anyone listening.** The audio was
+       never heard. Nobody held the slug's reply code, nobody
+       fetched the object. The lifecycle is the only path that
+       ever removes it.
+    2. **Someone listened but the sync `DeleteObject` failed.**
+       The audio was consumed and burned in DDB, but the Lambda's
        follow-up delete didn't land. This is the only case where
        "burned" and "still in S3" can coexist, and only until the
        lifecycle fires.
-  - **Reveal Lambda does synchronous S3 `DeleteObject`** after the
+  - **Listen Lambda does synchronous S3 `DeleteObject`** after the
     burn `UpdateItem` succeeds. Happy path: burned audio is gone
     from S3 within seconds of burn, not days. The 8-day lifecycle
     is the failure-mode fallback, not the primary cleanup path.
-    Losers of a concurrent reveal race do **not** call
+    Losers of a concurrent listen race do **not** call
     `DeleteObject` — the winner handles it.
 - **The 8-day fallback is principled, not lazy.** Data that never
   reached anyone cannot cause harm by lingering a week. Subpoenaing
@@ -777,7 +777,7 @@ laptop, etc.).
 - Editing or overwriting a pending message.
 - Multiple pending messages queued on a slug — one at a time.
 - Stateful HTTP routes for post-consume surfaces ("your turn",
-  "channel is done") — these live inline in the reveal response page
+  "channel is done") — these live inline in the listen response page
   only.
 - A `GET /state` endpoint with a phase enum. The two visible states
   are `200` (pending) and `404` (everything else).
@@ -794,8 +794,8 @@ laptop, etc.).
 - A one-slug-per-browser invariant. Clients hold state for any
   number of concurrent slugs. Multiple confessions in flight is a
   legitimate use case.
-- Reveal leases, acquire-lock steps, or lock nonces. Reveal is a
-  straight read-read-write sequence; racing reveals contend on a
+- Listen leases, acquire-lock steps, or lock nonces. Listen is a
+  straight read-read-write sequence; racing listens contend on a
   single conditional burn, and the loser returns content anyway
   (without a reply_code).
 - HMAC-signed tokens. The reply capability is a 4-char pointer
