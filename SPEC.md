@@ -691,8 +691,10 @@ laptop, etc.).
 - **Own state.** Single DynamoDB table. Single S3 bucket for audio.
   No GSIs. Single Lambda for the API. No cron, no background
   workers, no stream processors.
-- **Stack.** Go Lambda + DynamoDB + S3 + CloudFront. Mirrors
-  ephemeral.website. Any equivalent is fine.
+- **Stack.** Go Lambda + DynamoDB + S3 + CloudFront. Shares
+  conventions with the sister site ephemeral.website — see
+  [Relationship to ephemeral.website](#relationship-to-ephemeralwebsite)
+  below. Any equivalent stack is fine.
 - **Cleanup is infrastructure, not code.**
   - **DDB TTL** is configured on the `expires_at` attribute. Every
     item (META, SUB) carries the same `expires_at` value on
@@ -755,6 +757,58 @@ laptop, etc.).
   audio) and edge rate limits, not by per-sender tracking. The
   absolute cost ceiling is (rate limit × 1 MB) per source IP per
   window, which is tolerable at this scale.
+
+### Relationship to ephemeral.website
+
+confession.website is a sister site to ephemeral.website. Both
+are voice-first, burn-on-consume media with short slug-based
+lifetimes, and both run on the same AWS account with the same
+DNS provider (Namecheap). Same design discipline — URL-as-
+credential, minimal content-free logs, infrastructure-driven
+cleanup, no per-visitor identity.
+
+**Runtime is deliberately separate.** Each app gets its own:
+
+- Lambda functions (different handlers, different IAM roles)
+- DynamoDB tables (different schemas — ephemeral uses a Token +
+  Session two-table pattern, confession uses a single META item
+  per slug)
+- S3 buckets (different lifecycle rules)
+- CloudFront distributions (different domains, different cache
+  rules)
+- Go module and git repository
+- Pulumi stack
+
+**Why not fully merged.** A single-table DDB design across both
+apps would force unnatural abstractions — the two state machines
+have nothing in common at the item level. ephemeral is a
+multi-step Token → Session flow with heartbeats; confession is
+a single item that flips between pending and burned-empty in
+place. Forcing a shared item model would leak at every endpoint,
+and the cost savings are nil (AWS bills for these primitives are
+dominated by S3 bandwidth, which doesn't change with sharing).
+
+**Why not fully independent.** Both apps benefit from shared
+stack choices, design principles, and operational patterns
+(WAF rate limit rules, content-free logging, S3 presigning
+helpers, CloudFront origin config). These live at the
+conventions layer — copy-pasted between repos, not imported via
+a shared module. Duplication is cheap at the helper-library
+scale (< 500 lines per repo) and each app stays free to
+diverge without coordinating releases.
+
+**What IS shared:**
+
+- AWS account (with IAM isolation per app's resources)
+- DNS provider (Namecheap)
+- Stack choice (Go Lambda + DynamoDB + S3 + CloudFront)
+- Design principles (burn-on-consume, URL-as-credential,
+  minimal logs, infrastructure-driven cleanup)
+- Code conventions (Lambda handler structure, content-free
+  logging, WAF rules, deploy scripts) — copied, not imported
+
+**What is NOT shared:** runtime, state, traffic, blast radius.
+A bug or compromise in one site doesn't leak into the other.
 
 ## What not to build
 
