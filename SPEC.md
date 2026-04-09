@@ -24,21 +24,32 @@ tail_burned       : bool             — current tail has been consumed
 terminal          : bool             — text-only consume closed the channel
 tail_audio_s3_key : string | absent  — current tail audio; e.g. audio/<slug_id>/<16-hex>.opus
 tail_text         : string | absent  — current tail text, ≤ 280 chars
+reply_code        : string | absent  — 4-char crockford base32; present during reply window
+reply_code_exp    : int (epoch) | absent — reply window expiry
 created_at        : ISO8601
 expires_at        : int (epoch)      — created_at + 7d; DDB TTL attribute
 ```
 
-At any moment, META is either **pending** (`tail_burned=false`,
-at least one of `tail_audio_s3_key` or `tail_text` present) or
+At any moment, META is either **pending** (`tail_burned=false`, at
+least one of `tail_audio_s3_key` or `tail_text` present) or
 **burned-empty** (`tail_burned=true`, both content fields absent).
 Rally-compose flips burned-empty back to pending by overwriting
 the content fields and advancing `tail_seq`.
 
+`reply_code` is a 4-character crockford base32 string (uppercase
+`0-9 A-Z` minus `I L O U`) generated fresh on every reveal burn.
+It lives on META for at most `SUBMIT_DEADLINE` (7 minutes) and is
+`REMOVE`'d on successful rally-compose. The pointer model
+replaces the earlier signed-token approach — no HMAC, no server
+signing key. The capability is just "a short random value the
+server remembers for a few minutes."
+
 Field hygiene on burn: the `UpdateItem` REMOVEs
-`tail_audio_s3_key` and `tail_text`. The reveal Lambda holds
-`tail_audio_s3_key` in memory through the synchronous S3
-`DeleteObject` that follows the burn. Absence of the content
-fields is the invariant on burned-empty slugs.
+`tail_audio_s3_key` and `tail_text`, and SETs `reply_code`,
+`reply_code_exp`. The reveal Lambda holds `tail_audio_s3_key` in
+memory through the synchronous S3 `DeleteObject` that follows the
+burn. Absence of the content fields is the invariant on burned-
+empty slugs.
 
 **No NODE items.** The conversation is not a linked list of
 stored turns — it's a single cell that flips state. Past turns,
@@ -83,31 +94,38 @@ its condition expression.
     or return 409 if the slug was user-specified.
   - Sets `tail_seq = 1, tail_burned = false, terminal = false,
     tail_audio_s3_key, tail_text, created_at, expires_at`.
-- **Rally-compose (token-gated)** — one `UpdateItem` on META:
-  - Cond `tail_seq = :token_seq AND tail_burned = true AND
-    terminal = false AND expires_at > :now`.
-  - Sets `tail_seq = :token_seq + 1, tail_burned = false,
-    tail_audio_s3_key = :new_key, tail_text = :new_text`.
-  - The `tail_seq` match is the replay guard.
+- **Rally-compose (code-gated)** — one `UpdateItem` on META:
+  - Cond `reply_code = :request_code AND reply_code_exp > :now AND
+    tail_burned = true AND terminal = false AND expires_at > :now`.
+  - Sets `tail_seq = tail_seq + 1, tail_burned = false,
+    tail_audio_s3_key = :new_key, tail_text = :new_text`;
+    `REMOVE reply_code, reply_code_exp`.
+  - The pointer match on `reply_code` is the capability check.
+    Because the update `REMOVE`s it on success, a replayed compose
+    with the same code fails naturally — the field is absent.
 - **Reveal — burn** — one `UpdateItem` on META:
   - Cond `tail_seq = :seq AND tail_burned = false AND
     expires_at > :now`.
-  - Sets `tail_burned = true, terminal = :was_text_only`;
+  - Sets `tail_burned = true, terminal = :was_text_only`. If
+    non-terminal: also sets `reply_code = :fresh_code,
+    reply_code_exp = :now + SUBMIT_DEADLINE`.
     `REMOVE tail_audio_s3_key, tail_text`.
+  - `:fresh_code` is 4 random crockford base32 characters minted
+    server-side in this Lambda invocation.
   - The reveal Lambda keeps `tail_audio_s3_key` in memory for the
     sync S3 delete that follows.
 
 **Concurrent reveals are allowed to both return content.** The
 reveal path reads META, reads S3, tries to burn. If the burn's
 condition fails, another reveal already burned it — but this
-Lambda has already read the bytes from S3 and can return them
-to its client. Only the burn winner deletes S3 and mints a
-reply_token; the loser returns content with `reply_token = null`.
+Lambda has already read the bytes from S3 and can return them to
+its client. Only the burn winner sets a `reply_code` and deletes
+S3; the loser returns content with `reply_code = null`.
 
 URL-as-credential: whoever has the URL has the slug's privileges,
 including reading it concurrently with someone else. Burn
-serializes the rally state (only one reply_token is minted, only
-one compose can follow), not the content delivery.
+serializes the rally state (only one `reply_code` is written,
+only one compose can follow), not the content delivery.
 
 ### Client state
 
@@ -115,34 +133,41 @@ The client is almost stateless. There is no `slugs` store, no
 per-slug record, no reply-window state in localStorage. Two
 things are kept:
 
-**1. Reply token — URL fragment, not localStorage.** After a
-successful reveal, the client writes the token into the page URL
-as a hash fragment:
+**1. Reply code — URL fragment, not localStorage.** After a
+successful reveal the client writes the 4-char `reply_code` into
+the page URL as a hash fragment:
 
 ```
-https://confession.website/<slug>#t=<base64url-reply-token>
+https://confession.website/<slug>#A4F2
 ```
 
 The fragment survives page refresh, is never sent to the server,
 and never lands in server logs or referer headers. The client
-base64url-decodes the token to read `exp` (byte offset 4..12) for
-the countdown; the full encoded token goes back to the server on
-`POST /compose`. The client never verifies the HMAC — that's the
-server's job.
+treats the fragment as an opaque string and ships it verbatim on
+`POST /compose`. The reply window expiration is tracked by the
+reveal response's accompanying `reply_code_exp` timestamp (kept
+in JS memory — same countdown model as before, just without a
+signed token to decode).
 
 On successful rally-compose: client `history.replaceState`s to
 clean the fragment. On countdown expiry or burn-race loss: client
 clears the fragment. Refresh mid-window: client re-reads the
-fragment and resumes the countdown. The URL is the state.
+fragment and re-POSTs on send; if the code is still valid
+server-side, the compose succeeds. The URL is the state.
 
 **Cross-device via URL copy-paste is a feature, not a bug.**
-Since the token is in the URL fragment, copying the URL to another
+Since the code is in the URL fragment, copying the URL to another
 device (laptop with no mic → phone with mic, or the reverse)
 carries the reply capability along. This is consistent with
 URL-as-credential: the URL, including its fragment, is the whole
-credential. Sharing the URL during the reply window is sharing the
-capability — the user's choice, same trust model as sharing any
-URL from this site.
+credential. Sharing the URL during the reply window is sharing
+the capability — the user's choice, same trust model as sharing
+any URL from this site.
+
+**Dictation-friendly.** Four characters is short enough to read
+aloud ("A-four-F-two") over a phone. If the revealing device has
+no mic, the user can read the code to the other device, type it
+into the URL bar after the slug name, and reply.
 
 **2. Push subscriptions — minimal localStorage.** The only data
 the client persists to localStorage is a list of slugs it has
@@ -166,13 +191,13 @@ flow is fully URL-based and works in private browsing.
 
 ### Slug canonicalization
 
-`slug_id ∈ [a-z0-9-]{3,32}`. Lowercase ASCII letters, digits, and
-hyphen. No leading or trailing hyphen. Router, DDB PK, reply-token
-HMAC input, and S3 key prefix all use the same canonical string —
-no case folding, percent-decoding, or Unicode normalization applied
-anywhere downstream of request parse. Any request carrying a slug
-outside this grammar is rejected at the edge (400) before reaching
-handlers.
+`slug_id ∈ [a-z0-9-]{3,32}`. Lowercase ASCII letters, digits,
+and hyphen. No leading or trailing hyphen. Router, DDB PK, and
+S3 key prefix all use the same canonical string — no case
+folding, percent-decoding, or Unicode normalization applied
+anywhere downstream of request parse. Any request carrying a
+slug outside this grammar is rejected at the edge (400) before
+reaching handlers.
 
 ## HTTP API
 
@@ -188,8 +213,9 @@ free), never on the wire.
 - `audio_mime` must be `audio/ogg; codecs=opus` or
   `audio/webm; codecs=opus`. Anything else is 400.
 - `text` ≤ 280 chars (UTF-8, post-NFC normalization at parse).
-- `reply_token` base64url decodes to exactly 28 bytes
-  (4 seq + 8 exp + 16 hmac). Non-canonical base64url is rejected.
+- `reply_code` is exactly 4 characters from the crockford base32
+  alphabet. Server uppercases and strips internal dashes/whitespace
+  before matching; non-alphabet characters after stripping → 400.
 
 ### `GET /api/slug/<id>`
 
@@ -208,18 +234,19 @@ in the table.
 
 ### `POST /api/slug/<id>/reveal`
 
-Atomic burn. Returns content inline. Mints `reply_token`.
+Atomic burn. Returns content inline. Mints a `reply_code`.
 
 ```
 request  : (empty body)
 
 response 200:
   {
-    text       : string | null,
-    audio_mime : string | null,      — e.g. "audio/ogg; codecs=opus"
-    audio_b64  : string | null,
-    terminated : bool,
-    reply_token: string | null       — null for burn-race losers, and for terminal reveals
+    text          : string | null,
+    audio_mime    : string | null,   — e.g. "audio/ogg; codecs=opus"
+    audio_b64     : string | null,
+    terminated    : bool,
+    reply_code    : string | null,   — 4 crockford base32 chars; null for losers & terminal
+    reply_code_exp: int (epoch) | null   — reply window expiry; null iff reply_code is null
   }
 
 response 404: META absent, tail_burned=true already, terminal=true,
@@ -233,83 +260,86 @@ response 404: META absent, tail_burned=true already, terminal=true,
    Extract `tail_seq`, `tail_audio_s3_key`, `tail_text`.
 2. **Read audio** from S3 if `tail_audio_s3_key` present. On
    failure: return 404. (No state to clean up — no writes yet.)
-3. **Try the burn** — `UpdateItem` META with the burn condition.
-4. **On burn success:** sync `DeleteObject` S3. Mint `reply_token`
-   (null if the burn set `terminal = true`). Return body with
-   content and token.
-5. **On burn failure (`ConditionalCheckFailed`):** another reveal
-   beat us to it. Return body with content but `reply_token =
-   null`. Do **not** call `DeleteObject` — the winner will. The
-   caller gets to see the message; they don't get to rally.
+3. **Mint fresh `reply_code`** (4 random crockford base32 chars)
+   in Lambda memory. Compute
+   `reply_code_exp = :now + SUBMIT_DEADLINE`.
+4. **Try the burn** — `UpdateItem` META with the burn condition.
+   If non-terminal, the SET clause includes `reply_code` and
+   `reply_code_exp`.
+5. **On burn success:** sync `DeleteObject` S3. Return body with
+   content and the `reply_code` / `reply_code_exp` from step 3.
+   If terminal, both are `null`.
+6. **On burn failure (`ConditionalCheckFailed`):** another reveal
+   beat us to it. Return body with content but both
+   `reply_code = null` and `reply_code_exp = null`. Do **not**
+   call `DeleteObject` — the winner will. The caller sees the
+   message; they don't get to rally.
 
 **Concurrent-reveal semantics.** The URL is the credential, and
 whoever has the URL has the slug's privileges. If two browsers
 hit reveal in the same instant, both read the content. Only one
 burn commits; that one gets the rally-compose capability. The
-other sees the message and no more. This is consistent with URL-
-as-credential: sharing the URL is sharing the content, full stop.
-Burn serializes the rally state, not content delivery.
+other sees the message and no more. This is consistent with
+URL-as-credential: sharing the URL is sharing the content, full
+stop. Burn serializes the rally state, not content delivery.
 
 **At-most-once rally state (not delivery).** If the burn commits
 but the winner's response never reaches its client, the rally is
-dead (slug burned, no token delivered, sender can't revisit). The
-bytes may still have reached the client before the disconnect.
-DDB TTL eventually erases the husk. This is the cost of burn
-guarantees — the medium trades rally-delivery certainty for burn
-certainty. Aligned with "bravery deserves closure, not
-extraction" in DESIGN.md.
+dead (slug burned, `reply_code` written to META but never
+delivered, sender can't revisit). The bytes may still have
+reached the client before the disconnect. DDB TTL eventually
+erases the husk. This is the cost of burn guarantees — the
+medium trades rally-delivery certainty for burn certainty.
+Aligned with "bravery deserves closure, not extraction" in
+DESIGN.md.
 
 ### `POST /api/slug/<id>/compose`
 
-Rally-compose. Token-gated. Distinct endpoint from first-turn compose.
+Rally-compose. Code-gated. Distinct endpoint from first-turn compose.
 
 ```
 request:
   {
-    reply_token : string,
-    audio_b64   : string | null,
-    text        : string | null    — ≤ 280 chars
+    reply_code : string,            — 4-char crockford base32
+    audio_b64  : string | null,
+    text       : string | null      — ≤ 280 chars
   }
   At least one of audio_b64 or text required.
 
 response 201: { }
-response 400: token invalid, token expired, no content, text too long
-response 404: slug state rejects this token (state moved on, slug
-              expired, tail already advanced)
+response 400: code malformed, no content, text too long
+response 404: reply_code invalid, expired, already used, slug
+              state drifted, or slug expired
 ```
 
 **Sequence:**
 
-1. **Verify token.** HMAC with the server-global signing key.
-   Check `exp > :now`, decoded length, canonical base64url. On
-   fail: 400.
+1. **Validate format.** `reply_code` is 4 chars, crockford base32
+   alphabet. On fail: 400.
 2. **Upload audio** (if present) to S3 at a fresh key
    `audio/<slug_id>/<16-hex>.opus`. Keep the key in Lambda memory.
-3. **Write** via a single `UpdateItem` on META using the condition
-   and update expression in the atomicity contracts above. No
-   TransactWriteItems, no second item.
+3. **Write** via a single `UpdateItem` on META with the
+   code-gated condition from the atomicity contracts above. The
+   condition checks `reply_code = :request_code`, and the update
+   `REMOVE`s `reply_code` + `reply_code_exp`.
 4. **On success:** 201 `{ }`, then fan out push to all `SUB#...`
    items for this slug, payload `{ }`. Return.
-5. **On `ConditionalCheckFailed`:** return 404. The tail has
-   advanced, the slug expired, or state drifted. No retry shelter.
+5. **On `ConditionalCheckFailed`:** return 404. The code has been
+   consumed, expired, never existed, or the slug is gone.
 
-No DynamoDB read on the hot path before the write — the signed
-token carries the `tail_seq` the condition needs, and the update
-itself advances both `tail_seq` and the content fields in one
-operation.
+No DynamoDB read on the hot path before the write. The pointer
+is matched directly by the UpdateItem's condition expression.
 
-`reply_token` authorizes any compose modality. Modality
-determines the *next* state (text-only → next consume sets
-`terminal = true`), not whether the token is valid.
+`reply_code` authorizes any compose modality. Modality determines
+the *next* state (text-only → next consume sets `terminal =
+true`), not whether the code is valid.
 
 **Not idempotent.** A transient proxy failure that hides a
-successful server commit will show up as a 404 on retry. The
-message still landed; the sender sees "turn lost" but the
-confession reached the other party. At 5-min fuse with a rare
-failure mode, the cost of shelter (a GetItem on every compose
-attempt + a client-generated idempotency key) was larger than
-the occasional confused composer. Debounce at the UI layer;
-don't retry on unknown results.
+successful server commit will show up as a 404 on retry, because
+the update `REMOVE`s the `reply_code` on success and the retry's
+equality check fails. The message still landed; the sender sees
+"turn lost" but the confession reached the other party. Debounce
+at the UI layer; don't retry on unknown results.
 
 ### `POST /api/compose`
 
@@ -356,7 +386,7 @@ response 409: user-specified slug already taken (retry with a
      `<adjective>-<noun>` format is ~1 in 10⁶ per attempt; 5 tries
      is astronomical.)
 
-First-turn composer does not receive a `reply_token` — they have
+First-turn composer does not receive a `reply_code` — they have
 no reveal to derive one from. To send a second message, they must
 wait for (or provoke) a reply, consume it, and compose within the
 window.
@@ -391,46 +421,27 @@ requires one `GetItem` on META per subscribe, acceptable because
 subscribe is a once-per-session-per-device operation, not on any
 hot path.
 
-## Reply token format
+## Reply code format
 
 ```
-reply_token = base64url( seq_be || exp_be || hmac )    — 28 bytes decoded
-  seq_be : 4 bytes, big-endian (matches META.tail_seq at reveal)
-  exp_be : 8 bytes, big-endian unix epoch (token expiry)
-  hmac   : 16 bytes = HMAC-SHA256(
-             server_key,
-             "reply|" || slug_id || "|" || seq_be || "|" || exp_be
-           )[:16]
+reply_code : 4 characters, crockford base32 alphabet
+             (0-9, A-Z minus I L O U)
 ```
 
-- `slug_id` is the canonical form (see
-  [Slug canonicalization](#slug-canonicalization)). Router, DDB
-  key, and HMAC input use the same string — no case folding or
-  normalization applied anywhere between request parse and HMAC
-  compute.
-- `server_key` is a 32-byte random stored in SSM Parameter Store
-  with KMS encryption, loaded into Lambda env at cold start.
-  Rotating it invalidates all outstanding tokens — acceptable
-  because all tokens are ≤ `SUBMIT_DEADLINE` old (see
-  [Reply window](#reply-window--time-spans)).
-- `exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`,
-  where `reveal_time` is the server wall clock at burn-commit.
-- Verification:
-  1. Base64url decode. Reject if length ≠ 28 or encoding is not
-     canonical base64url (no padding, URL-safe alphabet).
-  2. Split into `seq_be || exp_be || hmac`.
-  3. Recompute HMAC over the same canonical input, constant-time
-     compare.
-  4. Check `exp > :now`.
-  5. Parse `seq` as the `:token_seq` binding in the DDB condition.
-- No per-slug secret. No DDB read on the compose hot path. The
-  rally-compose `UpdateItem` mutates META in place, so there is no
-  new item to stamp with `expires_at` — META already has its own.
+The code is generated server-side on each reveal burn as 4 random
+characters from the crockford base32 alphabet. Uppercase canonical
+on the wire; the server normalizes to uppercase and strips any
+internal dashes or whitespace before matching, so the client can
+display it in any casing it likes.
 
-128-bit truncated MAC is fine at this threat model — tokens are
-scoped by `slug_id` and expire within `SUBMIT_DEADLINE`, so a
-forgery would need to hit a live slug's current tail within a
-7-min window.
+The code is not signed and not cryptographically opaque. It's a
+short random pointer into META state: the server remembers it for
+≤ `SUBMIT_DEADLINE` minutes and accepts a rally-compose that
+matches it. 20-bit space (≈ 1M). The threat model — "someone
+forges a reply to a random confession" — is speculative and the
+harm is bounded, so 4 chars is deliberately chosen over 6-8 chars
+of cryptographic opacity. Rate limiting at the edge handles
+abuse. No HMAC, no signing key, no SSM secret to manage.
 
 ## Reply window — time spans
 
@@ -454,9 +465,11 @@ recording that starts at `t = RESPONSE_FUSE − ε` needs up to
 ceiling adjusts), `SUBMIT_DEADLINE` moves with it mechanically — no
 independent tuning.
 
-`reply_token.exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`.
-Judged at **request receipt**, not post-upload-processing, so a slow
-upload doesn't penalize a user who submitted in time.
+`reply_code_exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`,
+stored on META and checked by the rally-compose condition
+expression. Judged at **request receipt**, not post-upload-
+processing, so a slow upload doesn't penalize a user who
+submitted in time.
 
 **UI phases:**
 
@@ -544,14 +557,14 @@ from the user's perspective.
    - Display text (if present).
    - If `terminated = true`: transition inline to "this channel
      is done" state. No compose surface. No fragment written.
-   - If `reply_token = null` but not terminated: this Lambda lost
+   - If `reply_code = null` but not terminated: this Lambda lost
      the burn race. The user sees the content (they earned it by
      revealing) but no compose surface. Transition to 404 view
      after the content is dismissed.
    - Else: `history.replaceState` to
-     `confession.website/<slug>#t=<reply_token>`. Transition
-     inline to rally-compose surface. Decode the token's `exp`
-     field for the countdown.
+     `confession.website/<slug>#<reply_code>`. Keep
+     `reply_code_exp` in JS memory for the countdown. Transition
+     inline to rally-compose surface.
 6. On 404: transition to 404 view. Nothing pending (never
    existed, already consumed, terminated, or expired).
 
@@ -563,13 +576,13 @@ existing slug URL.
 
 1. Post-reveal page shows the just-consumed content *plus* the
    compose surface *plus* the countdown. URL is
-   `confession.website/<slug>#t=<token>`.
+   `confession.website/<slug>#<reply_code>`.
 2. (Optional) Record audio. Dynamic duration cap (see above).
 3. (Optional) Type text, ≤ 280 chars.
 4. Send active for all of `t < SUBMIT_DEADLINE`; overtime UI in
    `RESPONSE_FUSE ≤ t < SUBMIT_DEADLINE`.
-5. Tap send → `POST /api/slug/<id>/compose` with `{reply_token:
-   <token from fragment>, audio_b64?, text?}`.
+5. Tap send → `POST /api/slug/<id>/compose` with `{reply_code:
+   <code from fragment>, audio_b64?, text?}`.
 6. On 201: `history.replaceState` to clean the fragment
    (`/<slug>`). Show "sent" confirmation, transition to 404 view.
 7. On 400 / 404: clean the fragment. Transition to 404 view. The
@@ -579,9 +592,15 @@ If the user never taps send: at `t = SUBMIT_DEADLINE` the UI
 auto-collapses to 404 and cleans the fragment. Turn lost.
 
 **Refresh mid-window:** the fragment is still in the URL; client
-re-hydrates the compose surface, decodes `exp` from the token,
-continues the countdown. No server round-trip needed to restore
-state.
+re-hydrates the compose surface. The client has lost the exact
+`reply_code_exp` it knew from the reveal response body (JS memory
+doesn't survive refresh), so it shows the compose UI without a
+precise countdown — just the "hurry" visual — and relies on the
+server's condition check to reject late submissions. The server
+is authoritative via `reply_code_exp` on META; a POST arriving
+after the window closes gets 404. The normal non-refresh flow
+keeps the precise countdown because `reply_code_exp` is in JS
+memory from the reveal response.
 
 **Cross-device hand-off:** the user can copy the URL (including
 the fragment) from one device and paste it into another. The
@@ -718,7 +737,7 @@ laptop, etc.).
 - A `GET /state` endpoint with a phase enum. The two visible states
   are `200` (pending) and `404` (everything else).
 - A prohibition on cross-device reply. Copying the URL (including
-  its `#t=<token>` fragment) to another device is a supported
+  its `#<reply_code>` fragment) to another device is a supported
   hand-off, not a bug.
 - Distinguishable error codes for non-pending states. `no_pending`,
   `terminated`, `expired`, and `in_flight` collapse to a single
@@ -733,7 +752,13 @@ laptop, etc.).
 - Reveal leases, acquire-lock steps, or lock nonces. Reveal is a
   straight read-read-write sequence; racing reveals contend on a
   single conditional burn, and the loser returns content anyway
-  (without a reply_token).
+  (without a reply_code).
+- HMAC-signed tokens. The reply capability is a 4-char pointer
+  stored on META. No signing key, no SSM secret, no cryptography
+  on the compose path. The threat of "stranger forges a reply
+  to a random confession" was speculative and the harm is
+  bounded; short random pointer with rate-limited edge is
+  enough.
 - A history of turns as retrievable items. There is no NODE table
   and no list of past messages. A slug is a single cell that flips
   state; `tail_seq` is a counter, not a history pointer.
