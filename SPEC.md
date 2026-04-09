@@ -7,42 +7,44 @@ Implementation target. Principles and stakes live in
 
 ### Server — DynamoDB
 
-One table. Composite key: `PK = slug#<id>`, `SK = META | NODE#<seq> |
+One table. Composite key: `PK = slug#<id>`, `SK = META |
 SUB#<endpoint_hash>`. No GSIs. One S3 bucket for audio blobs.
 DynamoDB TTL on `expires_at` handles all cleanup.
 
-**META** — one per slug. Created on first-turn compose, destroyed
-by DDB TTL ~48 h after `expires_at`.
+**META** — one item per slug. Holds the current-tail content
+directly; past turns are not retained. Created on first-turn
+compose, mutated in place on every reveal and rally-compose,
+destroyed by DDB TTL ~48 h after `expires_at`.
 
 ```
-PK         = slug#<id>
-SK         = META
-tail_seq   : int             — seq of the current tail NODE
-tail_burned: bool            — current tail has been stubbed
-terminal   : bool            — channel permanently closed (text-only consume)
-created_at : ISO8601
-expires_at : int (epoch)     — created_at + 7d; DDB TTL attribute
+PK                = slug#<id>
+SK                = META
+tail_seq          : int              — monotonic; advances on rally-compose
+tail_burned       : bool             — current tail has been consumed
+terminal          : bool             — text-only consume closed the channel
+tail_audio_s3_key : string | absent  — current tail audio; e.g. audio/<slug_id>/<16-hex>.opus
+tail_text         : string | absent  — current tail text, ≤ 280 chars
+created_at        : ISO8601
+expires_at        : int (epoch)      — created_at + 7d; DDB TTL attribute
 ```
 
-**NODE** — one per turn. Zero-padded seq for lexicographic sort order.
-Never deleted individually; erased by DDB TTL alongside the rest of
-the slug.
+At any moment, META is either **pending** (`tail_burned=false`,
+at least one of `tail_audio_s3_key` or `tail_text` present) or
+**burned-empty** (`tail_burned=true`, both content fields absent).
+Rally-compose flips burned-empty back to pending by overwriting
+the content fields and advancing `tail_seq`.
 
-```
-PK           = slug#<id>
-SK           = NODE#<zero-padded seq, width 6>
-seq          : int
-audio_s3_key : string | absent      — e.g. audio/<slug_id>/<16-hex>.opus
-text         : string | absent      — ≤ 280 chars
-created_at   : ISO8601
-burned       : bool                 — content has been stubbed
-expires_at   : int (epoch)          — same as META.expires_at; DDB TTL attribute
-```
+Field hygiene on burn: the `UpdateItem` REMOVEs
+`tail_audio_s3_key` and `tail_text`. The reveal Lambda holds
+`tail_audio_s3_key` in memory through the synchronous S3
+`DeleteObject` that follows the burn. Absence of the content
+fields is the invariant on burned-empty slugs.
 
-Field hygiene on burn: `text` and `audio_s3_key` are `REMOVE`'d in
-the burn transaction. The reveal Lambda holds `audio_s3_key` in
-memory through the synchronous S3 `DeleteObject` that follows the
-burn commit. Absence of the content fields is the invariant.
+**No NODE items.** The conversation is not a linked list of
+stored turns — it's a single cell that flips state. Past turns,
+burned and content-free, have nothing to hold onto and aren't
+retained. The `tail_seq` counter is the only trace of turn
+history, and it exists solely as a replay guard for rally-compose.
 
 **SUB** — web push subscription. Plural per slug.
 
@@ -61,46 +63,51 @@ conditional put → at most one entry per endpoint. Plurality capped
 at **N=4** per slug; subscribes past the cap evict the oldest by
 `added_at`.
 
-**Expiry via DDB TTL.** Every item (META, NODE, SUB) carries the
-same `expires_at` value on creation — copied from META at rally
-compose (via reply_token, see below) and at subscribe time (via
-`GetItem` META). DynamoDB TTL is configured on `expires_at`; each
-item is deleted independently within ~48 hours of its TTL. No cron,
-no sweeper Lambda, no GSI on `expires_at`.
+**Expiry via DDB TTL.** META and SUB items both carry `expires_at`
+with the same value (the slug's 7-day ceiling). DynamoDB TTL is
+configured on `expires_at`; each item is deleted independently
+within ~48 hours of its TTL. No cron, no sweeper Lambda, no GSI.
 
-API handlers filter reads by `expires_at > :now` on every code path.
-Items past TTL but not yet deleted look identical to absent items.
+API handlers filter reads by `expires_at > :now` on every code
+path. Items past TTL but not yet deleted look identical to absent
+items.
 
-**Atomicity contracts.** Every mutating path includes
-`expires_at > :now` on META. An expired slug fails every mutation.
+**Atomicity contracts.** All mutations are single-item
+`UpdateItem`s on META. No `TransactWriteItems`. No multi-item
+writes anywhere. Every mutation includes `expires_at > :now` in
+its condition expression.
 
-- **First-turn compose** — one `TransactWriteItems`:
-  - `Put META`, cond `attribute_not_exists(PK)`. Collision → retry
-    with a fresh auto-generated slug (see
-    [first-turn compose](#post-apicompose)), or return 409 if the
-    slug was user-specified.
-  - `Put NODE#000001` (no condition — first ever node in this slug).
-- **Rally compose (token-gated)** — one `TransactWriteItems`:
-  - `Put NODE#<token.seq+1>`, cond `attribute_not_exists(SK)`.
-  - `Update META`, cond `tail_seq = :token_seq AND tail_burned = true
-    AND terminal = false AND expires_at > :now`; set
-    `tail_seq = :token_seq+1, tail_burned = false`. The `tail_seq`
-    match is the replay guard.
-- **Reveal — commit burn** — one `TransactWriteItems`:
-  - `Update NODE#<seq>`, cond `burned = false`; set `burned = true`;
-    `REMOVE text, audio_s3_key`. The Lambda holds `audio_s3_key`
-    in memory for the synchronous S3 delete that follows this
-    transaction.
-  - `Update META`, cond `tail_seq = :seq AND tail_burned = false AND
-    expires_at > :now`; set `tail_burned = true,
-    terminal = :was_text_only`.
+- **First-turn compose** — one `PutItem` on META:
+  - Cond `attribute_not_exists(PK)`. Collision → retry with a fresh
+    auto-generated slug (see [first-turn compose](#post-apicompose)),
+    or return 409 if the slug was user-specified.
+  - Sets `tail_seq = 1, tail_burned = false, terminal = false,
+    tail_audio_s3_key, tail_text, created_at, expires_at`.
+- **Rally-compose (token-gated)** — one `UpdateItem` on META:
+  - Cond `tail_seq = :token_seq AND tail_burned = true AND
+    terminal = false AND expires_at > :now`.
+  - Sets `tail_seq = :token_seq + 1, tail_burned = false,
+    tail_audio_s3_key = :new_key, tail_text = :new_text`.
+  - The `tail_seq` match is the replay guard.
+- **Reveal — burn** — one `UpdateItem` on META:
+  - Cond `tail_seq = :seq AND tail_burned = false AND
+    expires_at > :now`.
+  - Sets `tail_burned = true, terminal = :was_text_only`;
+    `REMOVE tail_audio_s3_key, tail_text`.
+  - The reveal Lambda keeps `tail_audio_s3_key` in memory for the
+    sync S3 delete that follows.
 
-The reveal path reads META and NODE sequentially before the
-transaction (to know `tail_seq` and `audio_s3_key`) and before the
-S3 read. Two GetItems + one GetObject + one TransactWriteItems +
-one DeleteObject. No lease, no nonce, no in-flight field — racing
-reveals simply contend on the NODE burn condition, one wins, the
-other returns 404. The loser discards any bytes it already read.
+**Concurrent reveals are allowed to both return content.** The
+reveal path reads META, reads S3, tries to burn. If the burn's
+condition fails, another reveal already burned it — but this
+Lambda has already read the bytes from S3 and can return them
+to its client. Only the burn winner deletes S3 and mints a
+reply_token; the loser returns content with `reply_token = null`.
+
+URL-as-credential: whoever has the URL has the slug's privileges,
+including reading it concurrently with someone else. Burn
+serializes the rally state (only one reply_token is minted, only
+one compose can follow), not the content delivery.
 
 ### Client — per-browser `localStorage`
 
@@ -161,9 +168,8 @@ free), never on the wire.
 - `audio_mime` must be `audio/ogg; codecs=opus` or
   `audio/webm; codecs=opus`. Anything else is 400.
 - `text` ≤ 280 chars (UTF-8, post-NFC normalization at parse).
-- `reply_token` base64url decodes to exactly 36 bytes
-  (4 seq + 8 exp + 8 slug_exp + 16 hmac). Non-canonical base64url
-  is rejected.
+- `reply_token` base64url decodes to exactly 28 bytes
+  (4 seq + 8 exp + 16 hmac). Non-canonical base64url is rejected.
 
 ### `GET /api/slug/<id>`
 
@@ -193,43 +199,45 @@ response 200:
     audio_mime : string | null,      — e.g. "audio/ogg; codecs=opus"
     audio_b64  : string | null,
     terminated : bool,
-    reply_token: string | null       — null iff terminated
+    reply_token: string | null       — null for burn-race losers, and for terminal reveals
   }
 
-response 404: any other state (never-existed, burned-empty,
-              terminated, expired, race lost)
+response 404: META absent, tail_burned=true already, terminal=true,
+              or expired
 ```
 
 **Sequence:**
 
 1. **Read META** via `GetItem`. Verify `expires_at > :now`,
    `tail_burned = false`, `terminal = false`. On any failure: 404.
-   Extract `tail_seq` and `expires_at`.
-2. **Read NODE#<tail_seq>** via `GetItem`. Verify
-   `burned = false`. Extract `audio_s3_key` and `text`. On failure:
-   404.
-3. **Read audio** from S3 if `audio_s3_key` present. On failure:
-   return 404. (No state to clean up — no writes yet.)
-4. **Commit burn** via `TransactWriteItems` as described above.
-   On `ConditionalCheckFailed`: return 404. **Do not return content,
-   do not delete S3** — someone else won the race, and the bytes
-   in memory are not ours to hand out.
-5. **Sync `DeleteObject` S3** using the in-memory `audio_s3_key`.
-   On failure: log content-free, continue. S3 lifecycle catches
-   orphans within 8 days.
-6. **Mint `reply_token`** — see [Reply token format](#reply-token-format).
-   `null` if the burn set `terminal = true`.
-7. **Return body** containing content bytes (as base64) and token.
+   Extract `tail_seq`, `tail_audio_s3_key`, `tail_text`.
+2. **Read audio** from S3 if `tail_audio_s3_key` present. On
+   failure: return 404. (No state to clean up — no writes yet.)
+3. **Try the burn** — `UpdateItem` META with the burn condition.
+4. **On burn success:** sync `DeleteObject` S3. Mint `reply_token`
+   (null if the burn set `terminal = true`). Return body with
+   content and token.
+5. **On burn failure (`ConditionalCheckFailed`):** another reveal
+   beat us to it. Return body with content but `reply_token =
+   null`. Do **not** call `DeleteObject` — the winner will. The
+   caller gets to see the message; they don't get to rally.
 
-**At-most-once delivery, sharpened.** If the burn transaction in
-step 4 commits but the response never reaches the client
-(disconnect, crash, proxy hang), the message is burned unread *and*
-no `reply_token` was delivered. The slug is immediately dead:
-nothing to reveal (content stubbed), no token to compose (never
-received). DDB TTL eventually erases the husk. This is the cost of
-burn guarantees — the medium trades delivery certainty for burn
-certainty. Aligned with "bravery deserves closure, not extraction"
-in DESIGN.md.
+**Concurrent-reveal semantics.** The URL is the credential, and
+whoever has the URL has the slug's privileges. If two browsers
+hit reveal in the same instant, both read the content. Only one
+burn commits; that one gets the rally-compose capability. The
+other sees the message and no more. This is consistent with URL-
+as-credential: sharing the URL is sharing the content, full stop.
+Burn serializes the rally state, not content delivery.
+
+**At-most-once rally state (not delivery).** If the burn commits
+but the winner's response never reaches its client, the rally is
+dead (slug burned, no token delivered, sender can't revisit). The
+bytes may still have reached the client before the disconnect.
+DDB TTL eventually erases the husk. This is the cost of burn
+guarantees — the medium trades rally-delivery certainty for burn
+certainty. Aligned with "bravery deserves closure, not
+extraction" in DESIGN.md.
 
 ### `POST /api/slug/<id>/compose`
 
@@ -252,34 +260,36 @@ response 404: slug state rejects this token (state moved on, slug
 
 **Sequence:**
 
-1. **Verify token.** HMAC with the server-global signing key. Check
-   `exp > :now`, decoded length, canonical base64url. On fail: 400.
+1. **Verify token.** HMAC with the server-global signing key.
+   Check `exp > :now`, decoded length, canonical base64url. On
+   fail: 400.
 2. **Upload audio** (if present) to S3 at a fresh key
    `audio/<slug_id>/<16-hex>.opus`. Keep the key in Lambda memory.
-3. **Write** via `TransactWriteItems` (the `Put NODE` sets
-   `audio_s3_key`, `text`, and `expires_at = token.slug_exp` —
-   same TTL as META).
+3. **Write** via a single `UpdateItem` on META using the condition
+   and update expression in the atomicity contracts above. No
+   TransactWriteItems, no second item.
 4. **On success:** 201 `{ }`, then fan out push to all `SUB#...`
    items for this slug, payload `{ }`. Return.
 5. **On `ConditionalCheckFailed`:** return 404. The tail has
    advanced, the slug expired, or state drifted. No retry shelter.
 
 No DynamoDB read on the hot path before the write — the signed
-token carries everything the write needs: tail seq, slug TTL, and
-the HMAC that proves both came from the same reveal.
+token carries the `tail_seq` the condition needs, and the update
+itself advances both `tail_seq` and the content fields in one
+operation.
 
-`reply_token` authorizes any compose modality. Modality determines
-the *next* state (text-only → next consume sets `terminal = true`),
-not whether the token is valid.
+`reply_token` authorizes any compose modality. Modality
+determines the *next* state (text-only → next consume sets
+`terminal = true`), not whether the token is valid.
 
 **Not idempotent.** A transient proxy failure that hides a
 successful server commit will show up as a 404 on retry. The
 message still landed; the sender sees "turn lost" but the
 confession reached the other party. At 5-min fuse with a rare
 failure mode, the cost of shelter (a GetItem on every compose
-attempt + a client-generated idempotency key) was larger than the
-occasional confused composer. Debounce at the UI layer; don't
-retry on unknown results.
+attempt + a client-generated idempotency key) was larger than
+the occasional confused composer. Debounce at the UI layer;
+don't retry on unknown results.
 
 ### `POST /api/compose`
 
@@ -309,24 +319,22 @@ response 409: user-specified slug already taken (retry with a
 
 1. **Validate** content, sizes. Validate `slug` if provided.
 2. **Upload audio** (if present) to S3 at
-   `audio/<slug_candidate>/<16-hex>.opus`. If the slug is
-   server-generated, use the first candidate's name for the upload
-   path; retries on DDB collision reuse the same S3 key (the object
-   is overwritten or re-keyed, implementer's choice).
+   `audio/<slug_candidate>/<16-hex>.opus`. Keep the key in Lambda
+   memory.
 3. Compute `:expires = :now + 7 days`.
-4. **Write** via `TransactWriteItems` creating META (`tail_seq=1,
-   tail_burned=false, terminal=false, created_at=:now,
-   expires_at=:expires`) and NODE#000001 (with `audio_s3_key`,
-   `text`, `expires_at=:expires`). `attribute_not_exists(PK)` on
-   the META Put is the collision guard.
+4. **Write** via a single `PutItem` on META with `tail_seq = 1,
+   tail_burned = false, terminal = false, tail_audio_s3_key,
+   tail_text, created_at = :now, expires_at = :expires`. Cond
+   `attribute_not_exists(PK)` is the collision guard.
 5. **On success:** 201 with the final slug and shareable URL.
 6. **On `ConditionalCheckFailed`:**
    - If `slug` was user-specified: return 409. Client prompts for
      a different name.
    - If `slug` was server-generated: mint a new candidate and
      retry, up to 5 attempts. After 5 collisions, return 500.
-     (Collision probability with a 1000-word list and `<word>-<word>`
-     format is ~1 in 10⁶ per attempt; 5 tries is astronomical.)
+     (Collision probability with a 1000-word list and
+     `<adjective>-<noun>` format is ~1 in 10⁶ per attempt; 5 tries
+     is astronomical.)
 
 First-turn composer does not receive a `reply_token` — they have
 no reveal to derive one from. To send a second message, they must
@@ -366,20 +374,18 @@ hot path.
 ## Reply token format
 
 ```
-reply_token = base64url( seq_be || exp_be || slug_exp_be || hmac )  — 36 bytes decoded
-  seq_be      : 4 bytes, big-endian (matches NODE.seq)
-  exp_be      : 8 bytes, big-endian unix epoch (token expiry)
-  slug_exp_be : 8 bytes, big-endian unix epoch (slug TTL, META.expires_at)
-  hmac        : 16 bytes = HMAC-SHA256(
-                  server_key,
-                  "reply|" || slug_id || "|" || seq_be || "|" || exp_be
-                              || "|" || slug_exp_be
-                )[:16]
+reply_token = base64url( seq_be || exp_be || hmac )    — 28 bytes decoded
+  seq_be : 4 bytes, big-endian (matches META.tail_seq at reveal)
+  exp_be : 8 bytes, big-endian unix epoch (token expiry)
+  hmac   : 16 bytes = HMAC-SHA256(
+             server_key,
+             "reply|" || slug_id || "|" || seq_be || "|" || exp_be
+           )[:16]
 ```
 
 - `slug_id` is the canonical form (see
-  [Slug canonicalization](#slug-canonicalization)). Router, DDB key,
-  and HMAC input use the same string — no case folding or
+  [Slug canonicalization](#slug-canonicalization)). Router, DDB
+  key, and HMAC input use the same string — no case folding or
   normalization applied anywhere between request parse and HMAC
   compute.
 - `server_key` is a 32-byte random stored in SSM Parameter Store
@@ -387,26 +393,24 @@ reply_token = base64url( seq_be || exp_be || slug_exp_be || hmac )  — 36 bytes
   Rotating it invalidates all outstanding tokens — acceptable
   because all tokens are ≤ `SUBMIT_DEADLINE` old (see
   [Reply window](#reply-window--time-spans)).
-- `exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`, where
-  `reveal_time` is the server wall clock at burn-commit.
-- `slug_exp` carries META's `expires_at` verbatim so rally-compose
-  can stamp the new NODE's TTL attribute without reading META.
-  Signed along with `exp` and `seq` to prevent tampering.
+- `exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`,
+  where `reveal_time` is the server wall clock at burn-commit.
 - Verification:
-  1. Base64url decode. Reject if length ≠ 36 or encoding is not
+  1. Base64url decode. Reject if length ≠ 28 or encoding is not
      canonical base64url (no padding, URL-safe alphabet).
-  2. Split into `seq_be || exp_be || slug_exp_be || hmac`.
+  2. Split into `seq_be || exp_be || hmac`.
   3. Recompute HMAC over the same canonical input, constant-time
      compare.
   4. Check `exp > :now`.
   5. Parse `seq` as the `:token_seq` binding in the DDB condition.
-  6. Use `slug_exp` as the NODE's `expires_at` on write.
-- No per-slug secret. No DDB read on the compose hot path.
+- No per-slug secret. No DDB read on the compose hot path. The
+  rally-compose `UpdateItem` mutates META in place, so there is no
+  new item to stamp with `expires_at` — META already has its own.
 
 128-bit truncated MAC is fine at this threat model — tokens are
 scoped by `slug_id` and expire within `SUBMIT_DEADLINE`, so a
-forgery would need to hit a live slug's current tail within a 7-min
-window.
+forgery would need to hit a live slug's current tail within a
+7-min window.
 
 ## Reply window — time spans
 
@@ -587,7 +591,7 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
   ephemeral.website. Any equivalent is fine.
 - **Cleanup is infrastructure, not code.**
   - **DDB TTL** is configured on the `expires_at` attribute. Every
-    item (META, NODE, SUB) carries the same `expires_at` value on
+    item (META, SUB) carries the same `expires_at` value on
     creation. DynamoDB deletes each item independently within ~48 h
     of TTL. No sweeper Lambda, no GSI, no pagination logic.
   - **S3 lifecycle rule** on the audio bucket: delete any object
@@ -604,10 +608,11 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
        "burned" and "still in S3" can coexist, and only until the
        lifecycle fires.
   - **Reveal Lambda does synchronous S3 `DeleteObject`** after the
-    burn transaction commits (step 4 of the reveal sequence). Happy
-    path: burned audio is gone from S3 within seconds of burn, not
-    days. The 8-day lifecycle is the failure-mode fallback, not the
-    primary cleanup path.
+    burn `UpdateItem` succeeds. Happy path: burned audio is gone
+    from S3 within seconds of burn, not days. The 8-day lifecycle
+    is the failure-mode fallback, not the primary cleanup path.
+    Losers of a concurrent reveal race do **not** call
+    `DeleteObject` — the winner handles it.
 - **The 8-day fallback is principled, not lazy.** Data that never
   reached anyone cannot cause harm by lingering a week. Subpoenaing
   untouched audio — content nobody accessed, nobody listened to, and
@@ -685,8 +690,14 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
   number of concurrent slugs. Multiple confessions in flight is a
   legitimate use case.
 - Reveal leases, acquire-lock steps, or lock nonces. Reveal is a
-  straight read-read-read-write sequence; racing reveals contend
-  on a single conditional burn.
+  straight read-read-write sequence; racing reveals contend on a
+  single conditional burn, and the loser returns content anyway
+  (without a reply_token).
+- A history of turns as retrievable items. There is no NODE table
+  and no list of past messages. A slug is a single cell that flips
+  state; `tail_seq` is a counter, not a history pointer.
+- `TransactWriteItems` anywhere. Every mutation is a single-item
+  `UpdateItem` or `PutItem` on META.
 - Compose idempotency via client-generated dedup keys. Transient
   hidden-success retries surface as "turn lost" — the confession
   still landed, the composer sees a rare 404.
