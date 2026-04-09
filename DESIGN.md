@@ -36,17 +36,19 @@ unreachable.
   by push. The 404 is the receipt.
 - **Reciprocity has a fuse.** Rally-compose lives in a 5-minute
   window opened by reveal, with a 2-minute grace for in-progress
-  recording. The fuse burns on engagement, not on URL-holding: only
-  the browser that just revealed can reply, and only for the next few
-  minutes. Decay is part of the gesture — a reply that comes an hour
-  later isn't the same reply.
-- **Rally-compose is capability-bound, not URL-bound.** Anyone with
-  the URL can reveal, and anyone with a fresh slug name can
-  first-turn-compose. But replying to a rally requires the token
-  minted at reveal, which lives in the browser that revealed.
-  Cross-device reply is not supported: if you reveal on your phone,
-  you reply on your phone. This narrows URL-as-credential for
-  rally-compose specifically, in exchange for strict turn semantics.
+  recording. The fuse burns on engagement, not on URL-holding —
+  the capability to reply is minted fresh at each reveal and
+  expires with the window. Decay is part of the gesture: a reply
+  that comes an hour later isn't the same reply.
+- **The URL is the whole credential, fragment included.** During
+  the reply window the URL carries a short-lived reply token in
+  its hash fragment. Copying the URL between your own devices to
+  reply from a different one — laptop with no mic, phone with a
+  better keyboard, whatever — is a feature. Sharing the URL
+  during the window hands the reply capability to whoever
+  receives it; this is the same trust model as sharing any URL
+  from the site, consistently applied. Outside the window, the
+  fragment is empty and the URL points at plain state.
 - **The site refuses to extract, observe, or escalate.** The only
   active signal is "a new message is waiting" (push). Everything else
   — whether the previous message was consumed, whether the channel

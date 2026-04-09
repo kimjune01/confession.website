@@ -109,40 +109,60 @@ including reading it concurrently with someone else. Burn
 serializes the rally state (only one reply_token is minted, only
 one compose can follow), not the content delivery.
 
-### Client — per-browser `localStorage`
+### Client state
 
-Per-slug state. A browser can hold state for any number of slugs
-concurrently — no one-alive invariant. Each slug's record is
-independent.
+The client is almost stateless. There is no `slugs` store, no
+per-slug record, no reply-window state in localStorage. Two
+things are kept:
+
+**1. Reply token — URL fragment, not localStorage.** After a
+successful reveal, the client writes the token into the page URL
+as a hash fragment:
 
 ```
-slugs : {
-  "<slug_id>": {
-    role             : "creator" | "consumer",
-    created_at       : ISO8601,
-    reply_capability : {               — present iff last reveal was non-terminal
-      token     : string,              — reply_token from reveal response
-      reveal_at : int (epoch)          — client time; drives UI countdown
-    } | null
-  },
-  ...
-}
+https://confession.website/<slug>#t=<base64url-reply-token>
 ```
 
-- A slug record is created on successful first-turn compose
-  (`role = "creator"`) or successful reveal (`role = "consumer"`).
-  Multiple slugs can coexist — the user is free to open new
-  confessions while others are still alive.
-- `reply_capability` is set on successful reveal (non-terminal)
-  and cleared on successful rally-compose **or** on countdown
-  expiry (`reveal_at + SUBMIT_DEADLINE < :now`). The enclosing
-  `slugs` key already scopes the capability to the right slug.
-- A slug record is pruned by the UI when `reveal_at +
-  SUBMIT_DEADLINE < :now` (no live reply window), or when the
-  user explicitly clears history. Stale records are harmless but
-  take up space.
-- Clearing `localStorage` abandons all slugs from this browser's
-  perspective. The server has no way to reconnect.
+The fragment survives page refresh, is never sent to the server,
+and never lands in server logs or referer headers. The client
+base64url-decodes the token to read `exp` (byte offset 4..12) for
+the countdown; the full encoded token goes back to the server on
+`POST /compose`. The client never verifies the HMAC — that's the
+server's job.
+
+On successful rally-compose: client `history.replaceState`s to
+clean the fragment. On countdown expiry or burn-race loss: client
+clears the fragment. Refresh mid-window: client re-reads the
+fragment and resumes the countdown. The URL is the state.
+
+**Cross-device via URL copy-paste is a feature, not a bug.**
+Since the token is in the URL fragment, copying the URL to another
+device (laptop with no mic → phone with mic, or the reverse)
+carries the reply capability along. This is consistent with
+URL-as-credential: the URL, including its fragment, is the whole
+credential. Sharing the URL during the reply window is sharing the
+capability — the user's choice, same trust model as sharing any
+URL from this site.
+
+**2. Push subscriptions — minimal localStorage.** The only data
+the client persists to localStorage is a list of slugs it has
+subscribed to push for, so the service worker can route
+notification-click to the right URL:
+
+```
+localStorage.subscriptions : [
+  { slug_id: string, subscribed_at: ISO8601 }
+]
+```
+
+Ordered by `subscribed_at`, capped at ~5 entries, evict oldest.
+On `notificationclick`, the SW opens the most recently-subscribed
+slug's URL. Wrong-slug routing is a rare misfire in a multi-
+subscription scenario; the user can navigate if it happens.
+
+Private browsing: push is disabled by browsers in private mode, so
+the localStorage dependency is moot in that context. The reply
+flow is fully URL-based and works in private browsing.
 
 ### Slug canonicalization
 
@@ -474,9 +494,9 @@ submission at `RESPONSE_FUSE + ε` isn't cut.
 expected end lands before `SUBMIT_DEADLINE`. If not, the record
 button is disabled.
 
-**`localStorage.reply_capability` is cleared at
-`t = SUBMIT_DEADLINE` even without a send**, so a browser revisit
-shows the 404 view cleanly.
+**The URL fragment is cleaned at `t = SUBMIT_DEADLINE`** even
+without a send, via `history.replaceState` to `/<slug>`. A
+browser revisit after expiry shows the 404 view cleanly.
 
 **Drift is fine at this scale.** We're dealing with minutes, not
 milliseconds. The UI countdown drifting a few seconds against the
@@ -500,9 +520,10 @@ from the user's perspective.
    - Text only → *send (ends the channel)*
 7. `POST /api/compose` with `{audio_b64?, text?}`. No slug in the
    body — server generates.
-8. On 201: server returns `{slug, url}`. Client stores a record
-   under `slugs["<slug>"] = {role: "creator", created_at: now,
-   reply_capability: null}`. Show the URL + share affordance.
+8. On 201: server returns `{slug, url}`. Client navigates to
+   `confession.website/<slug>` and shows the URL + share
+   affordance. No localStorage write — the creator has no reply
+   capability until they reveal an incoming reply.
 9. (Optional before step 7) **Customize the slug.** A small
    "customize URL" affordance lets the user propose their own
    name. If taken, server returns 409; client prompts for another.
@@ -521,34 +542,53 @@ from the user's perspective.
 5. On 200:
    - Play audio (if present) from the base64-decoded body.
    - Display text (if present).
-   - If `terminated = true`: transition inline to "this channel is
-     done" state. No compose surface.
-   - Else: write `slugs["<slug>"] = {role: "consumer", created_at:
-     now, reply_capability: {token, reveal_at: now}}`. Transition
-     inline to rally-compose surface with `RESPONSE_FUSE` countdown.
-6. On 404: transition to 404 view. The race was lost (someone else
-   revealed first, or the slug moved on).
+   - If `terminated = true`: transition inline to "this channel
+     is done" state. No compose surface. No fragment written.
+   - If `reply_token = null` but not terminated: this Lambda lost
+     the burn race. The user sees the content (they earned it by
+     revealing) but no compose surface. Transition to 404 view
+     after the content is dismissed.
+   - Else: `history.replaceState` to
+     `confession.website/<slug>#t=<reply_token>`. Transition
+     inline to rally-compose surface. Decode the token's `exp`
+     field for the countdown.
+6. On 404: transition to 404 view. Nothing pending (never
+   existed, already consumed, terminated, or expired).
 
 ### Subsequent turn — rally compose
 
-Rally-compose lives only as an inline state on the post-reveal page.
-There is no dedicated URL, no route, no landing surface.
+Rally-compose lives only as an inline state on the post-reveal
+page. There is no dedicated URL path, just a fragment on the
+existing slug URL.
 
 1. Post-reveal page shows the just-consumed content *plus* the
-   compose surface *plus* the countdown.
+   compose surface *plus* the countdown. URL is
+   `confession.website/<slug>#t=<token>`.
 2. (Optional) Record audio. Dynamic duration cap (see above).
 3. (Optional) Type text, ≤ 280 chars.
 4. Send active for all of `t < SUBMIT_DEADLINE`; overtime UI in
    `RESPONSE_FUSE ≤ t < SUBMIT_DEADLINE`.
-5. Tap send → `POST /api/slug/<id>/compose` with
-   `{reply_token: slugs[slug].reply_capability.token, audio_b64?, text?}`.
-6. On 201: clear `slugs[slug].reply_capability`, show "sent"
-   confirmation, transition to 404 view.
-7. On 400 / 404: clear `reply_capability`, transition to 404 view.
-   The turn is lost.
+5. Tap send → `POST /api/slug/<id>/compose` with `{reply_token:
+   <token from fragment>, audio_b64?, text?}`.
+6. On 201: `history.replaceState` to clean the fragment
+   (`/<slug>`). Show "sent" confirmation, transition to 404 view.
+7. On 400 / 404: clean the fragment. Transition to 404 view. The
+   turn is lost.
 
 If the user never taps send: at `t = SUBMIT_DEADLINE` the UI
-auto-collapses to 404. `reply_capability` is cleared. Turn lost.
+auto-collapses to 404 and cleans the fragment. Turn lost.
+
+**Refresh mid-window:** the fragment is still in the URL; client
+re-hydrates the compose surface, decodes `exp` from the token,
+continues the countdown. No server round-trip needed to restore
+state.
+
+**Cross-device hand-off:** the user can copy the URL (including
+the fragment) from one device and paste it into another. The
+second device sees the fragment, hydrates the compose surface,
+and can reply within the remaining window. Useful when the
+revealing device can't record (desktop with no mic, borrowed
+laptop, etc.).
 
 ## Notifications
 
@@ -677,8 +717,9 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
   only.
 - A `GET /state` endpoint with a phase enum. The two visible states
   are `200` (pending) and `404` (everything else).
-- Cross-device reply-capability transfer. The reply token is
-  browser-bound, intentionally.
+- A prohibition on cross-device reply. Copying the URL (including
+  its `#t=<token>` fragment) to another device is a supported
+  hand-off, not a bug.
 - Distinguishable error codes for non-pending states. `no_pending`,
   `terminated`, `expired`, and `in_flight` collapse to a single
   `404` on the wire.
