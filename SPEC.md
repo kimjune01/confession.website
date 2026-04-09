@@ -688,13 +688,41 @@ laptop, etc.).
 
 - **Own domain.** Both parties visit `confession.website`. Link is
   `confession.website/<slug>`.
-- **Own state.** Single DynamoDB table. Single S3 bucket for audio.
-  No GSIs. Single Lambda for the API. No cron, no background
-  workers, no stream processors.
-- **Stack.** Go Lambda + DynamoDB + S3 + CloudFront. Shares
-  conventions with the sister site ephemeral.website — see
-  [Relationship to ephemeral.website](#relationship-to-ephemeralwebsite)
-  below. Any equivalent stack is fine.
+- **Own state.** Single DynamoDB table. Single S3 bucket for
+  audio. No GSIs. No cron, no background workers, no stream
+  processors.
+- **Lambda granularity.** One Lambda function per HTTP endpoint,
+  matching the ephemeral.website pattern. Five handlers:
+  `compose` (first-turn), `listen`, `rally_compose`, `probe`
+  (`GET /slug/<id>`), `subscribe`. Each is a small Go `main.go`
+  that imports a local `internal` package for DDB + S3 clients,
+  response helpers, and slug validation. Per-endpoint IAM roles
+  tighten blast radius: `listen` only needs `GetItem` META +
+  `UpdateItem` burn + `GetObject`/`DeleteObject` S3;
+  `rally_compose` only needs `UpdateItem` META + `PutObject` S3;
+  and so on.
+- **Stack.** Go Lambda + DynamoDB + S3 + CloudFront + API
+  Gateway v2 (HTTP API). Shares conventions with the sister
+  site ephemeral.website — see [Relationship to
+  ephemeral.website](#relationship-to-ephemeralwebsite) below.
+  Any equivalent stack is fine.
+- **Audio flows through Lambda, not presigned URLs.** Unlike
+  ephemeral.website, which uses presigned S3 URLs for both
+  upload and download, confession.website sends audio as inline
+  `audio_b64` in request and response bodies. Two reasons:
+  1. **UX.** The 5-minute reply fuse is unforgiving. A presigned
+     upload flow would require `POST metadata → GET url → PUT
+     S3 → confirm` — three to four round trips where one would
+     do. Inline base64 keeps "send" as a single atomic commit
+     against the deadline.
+  2. **Burn semantics.** On listen, the Lambda reads S3, burns
+     DDB, sync-deletes S3, and returns bytes — all in one
+     invocation. Splitting this into presigned-URL delivery
+     would leak the capability (the URL is valid until S3
+     delete actually fires) and break the "burn and deliver are
+     one atomic server action" property.
+  The 512 KB audio ceiling × 1.33 base64 inflation = ~680 KB
+  request/response body, well under Lambda's 6 MB sync limit.
 - **Cleanup is infrastructure, not code.**
   - **DDB TTL** is configured on the `expires_at` attribute. Every
     item (META, SUB) carries the same `expires_at` value on
@@ -761,54 +789,86 @@ laptop, etc.).
 ### Relationship to ephemeral.website
 
 confession.website is a sister site to ephemeral.website. Both
-are voice-first, burn-on-consume media with short slug-based
-lifetimes, and both run on the same AWS account with the same
-DNS provider (Namecheap). Same design discipline — URL-as-
-credential, minimal content-free logs, infrastructure-driven
-cleanup, no per-visitor identity.
+are voice-first, burn-on-consume media running on the same AWS
+account, the same DNS provider (Namecheap), the same stack (Go
+Lambda + DynamoDB + S3 + CloudFront + API Gateway v2), and the
+same design discipline — URL-as-credential, minimal content-free
+logs, infrastructure-driven cleanup, no per-visitor identity.
 
-**Runtime is deliberately separate.** Each app gets its own:
+**Shared architecture patterns:**
+
+- **One Lambda per endpoint.** ephemeral.website has
+  `upload`, `check`, `complete`, `heartbeat`, `session`, `site`,
+  `stream`. confession.website has `compose`, `probe`, `listen`,
+  `rally_compose`, `subscribe`. Each is a small Go `main.go`
+  binary importing a local `internal` package. Tighter IAM
+  roles per function, independent deployability, clearer blast
+  radius.
+- **Local `internal` package** with DDB client, S3 client,
+  response helpers, slug canonicalization, error shapes. Not a
+  shared Go module — copied between repos. At two-app scale,
+  duplication of ~500 lines of helpers is cheaper than shared
+  dependency management.
+- **API Gateway v2 HTTP API** routing paths to Lambda functions.
+- **Content-free logging** via a shared helper pattern: never
+  log message content, slug IDs, or reply text. Only infra
+  signals (error counts, duration p99).
+- **Edge rate limiting via CloudFront + WAF.** Same rule
+  templates, same threshold tuning.
+
+**Where the two apps deliberately diverge:**
+
+- **Data model.** ephemeral uses a Token + Session two-table
+  pattern with heartbeats for pause detection. confession uses
+  a single META item per slug, flipped in place between
+  pending and burned-empty. The state machines have nothing in
+  common at the item level; merging them into a single-table
+  DDB design would leak at every endpoint and save nothing on
+  AWS bills (dominated by S3 bandwidth either way).
+- **Audio upload/download.** ephemeral uses **presigned S3
+  URLs**: the client uploads directly via `PresignUpload` and
+  streams directly via `PresignStream`. confession uses
+  **inline base64** in request and response bodies, because:
+  1. The 5-minute reply fuse can't afford the extra round
+     trips of a presigned-URL dance.
+  2. `POST /listen` needs to read S3, burn DDB, sync-delete
+     S3, and return bytes in one atomic Lambda invocation —
+     splitting delivery into a presigned URL would leak the
+     capability beyond the burn transaction.
+  For ephemeral's use case (longer outbound messages, no burn
+  race), presigned URLs are the right call; for confession's
+  (short audio, strict atomicity), inline is the right call.
+  The divergence is principled, not accidental.
+
+**Runtime is entirely separate.** Each app gets its own:
 
 - Lambda functions (different handlers, different IAM roles)
-- DynamoDB tables (different schemas — ephemeral uses a Token +
-  Session two-table pattern, confession uses a single META item
-  per slug)
+- DynamoDB tables (different schemas)
 - S3 buckets (different lifecycle rules)
 - CloudFront distributions (different domains, different cache
   rules)
-- Go module and git repository
+- Go module (`confession-backend` vs `ephemeral-backend`)
+- Git repository
 - Pulumi stack
 
-**Why not fully merged.** A single-table DDB design across both
-apps would force unnatural abstractions — the two state machines
-have nothing in common at the item level. ephemeral is a
-multi-step Token → Session flow with heartbeats; confession is
-a single item that flips between pending and burned-empty in
-place. Forcing a shared item model would leak at every endpoint,
-and the cost savings are nil (AWS bills for these primitives are
-dominated by S3 bandwidth, which doesn't change with sharing).
-
-**Why not fully independent.** Both apps benefit from shared
-stack choices, design principles, and operational patterns
-(WAF rate limit rules, content-free logging, S3 presigning
-helpers, CloudFront origin config). These live at the
-conventions layer — copy-pasted between repos, not imported via
-a shared module. Duplication is cheap at the helper-library
-scale (< 500 lines per repo) and each app stays free to
-diverge without coordinating releases.
+A bug or compromise in one site doesn't leak into the other.
+Blast radius isolation is free at this scale — a second Pulumi
+stack is ~30 minutes of setup.
 
 **What IS shared:**
 
 - AWS account (with IAM isolation per app's resources)
 - DNS provider (Namecheap)
-- Stack choice (Go Lambda + DynamoDB + S3 + CloudFront)
+- Stack choice (Go Lambda + DynamoDB + S3 + CloudFront +
+  API Gateway v2)
 - Design principles (burn-on-consume, URL-as-credential,
   minimal logs, infrastructure-driven cleanup)
-- Code conventions (Lambda handler structure, content-free
-  logging, WAF rules, deploy scripts) — copied, not imported
+- Code conventions (Lambda handler structure, `internal`
+  package shape, content-free logging, WAF rules, deploy
+  scripts) — copied, not imported
 
-**What is NOT shared:** runtime, state, traffic, blast radius.
-A bug or compromise in one site doesn't leak into the other.
+**What is NOT shared:** runtime, state, traffic, blast radius,
+data model, audio transport pattern.
 
 ## What not to build
 
