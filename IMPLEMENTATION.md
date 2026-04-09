@@ -10,6 +10,39 @@ text terminator and burn-on-listen semantics. Design and spec
 are settled across twelve commits of iteration. **This task is
 building it, not re-litigating it.**
 
+## Prerequisites: directory layout
+
+This brief assumes `confession.website` and `ephemeral.website`
+are siblings on disk, and that your current working directory
+is the root of `confession.website` (or a parallel impl clone
+at the same depth, e.g., `confession.website-impl-A`).
+
+```
+~/Documents/
+  confession.website/           ← this repo (read-only reference)
+  confession.website-impl-A/    ← your impl directory (if blind-blind-merge)
+  confession.website-impl-B/    ← the other impl directory
+  ephemeral.website/            ← sister site; source for copied patterns
+```
+
+All `../ephemeral.website/...` references below resolve
+correctly from any of the three `confession.website*`
+directories because they are siblings of `ephemeral.website/`.
+
+**Before starting, verify:**
+
+```bash
+ls ../ephemeral.website/backend/internal/store.go
+ls ../ephemeral.website/backend/cmd/upload/main.go
+ls ../ephemeral.website/ROADMAP.md
+```
+
+If any of those fail, stop and report: the sibling layout is
+missing and the copy-from-ephemeral plan won't work. The
+operator setting up the impl environment needs to clone
+ephemeral.website next to your impl directory before you can
+proceed.
+
 ## Files to read before writing anything
 
 **Load-bearing, do not modify:**
