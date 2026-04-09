@@ -560,12 +560,19 @@ from the user's perspective.
    `confession.website/<slug>` and shows the URL + share
    affordance. No localStorage write — the creator has no reply
    capability until they reveal an incoming reply.
-9. (Optional before step 7) **Customize the slug.** A small
-   "customize URL" affordance lets the user propose their own
-   name. If taken, server returns 409; client prompts for another.
-10. (Optional after step 8) Push opt-in: single button *notify
-    you when a reply arrives?* Tap triggers Web Push permission
-    prompt, then `POST /api/slug/<id>/subscribe`.
+9. **Push opt-in — only if the message is replyable.** If the
+   message carried any audio (even with text), the send was a
+   rally-keeper, and the recipient's reply will show up on this
+   slug. Show a single button: *notify you when a reply arrives?*
+   Tap triggers Web Push permission prompt, then
+   `POST /api/slug/<slug>/subscribe` and stores
+   `{slug_id, subscribed_at}` in `localStorage.subscriptions`.
+   **Skip this step if the send was text-only** — the channel
+   will terminate on consume and there is no reply to wait for.
+10. (Optional, available before step 7) **Customize the slug.** A
+    small "customize URL" affordance lets the user propose their
+    own name. If taken, server returns 409; client prompts for
+    another.
 
 ### Subsequent turn — consume
 
@@ -607,9 +614,18 @@ existing slug URL.
 5. Tap send → `POST /api/slug/<id>/compose` with `{reply_code:
    <code from fragment>, audio_b64?, text?}`.
 6. On 201: `history.replaceState` to clean the fragment
-   (`/<slug>`). Show "sent" confirmation, transition to 404 view.
-7. On 400 / 404: clean the fragment. Transition to 404 view. The
-   turn is lost.
+   (`/<slug>`). Show "sent" confirmation.
+7. **Push opt-in — only if the reply was itself replyable.** If
+   the reply carried any audio, the rally continues and the other
+   party's next message will show up on this slug. Show the same
+   *notify you when a reply arrives?* button, suppressed if a
+   subscription for this slug already exists in
+   `localStorage.subscriptions`. **Skip for text-only replies** —
+   the channel terminates on the other party's consume and there
+   is nothing to wait for.
+8. Transition to 404 view.
+9. On 400 / 404 from step 5: clean the fragment. Transition to
+   404 view. The turn is lost.
 
 If the user never taps send: at `t = SUBMIT_DEADLINE` the UI
 auto-collapses to 404 and cleans the fragment. Turn lost.
@@ -634,10 +650,16 @@ laptop, etc.).
 
 ## Notifications
 
-- **Opt-in after first send.** One prompt: *notify you when the next
-  message arrives?* Tap → Web Push permission prompt →
-  `POST /api/slug/<id>/subscribe`. Deny/skip → no subscription,
-  manual check only.
+- **Opt-in after any replyable send.** A "replyable send" is any
+  compose (first-turn or rally) that carried audio — the channel
+  stays open for a response. After the 201 response, show a
+  single button: *notify you when a reply arrives?* Tap → Web
+  Push permission prompt → `POST /api/slug/<id>/subscribe`.
+  Deny/skip → no subscription, manual check only. **Text-only
+  sends skip this prompt** because they terminate the channel on
+  consume — there's no reply to wait for. Suppress the button
+  if `localStorage.subscriptions` already contains this slug
+  (the user has already opted in).
 - **One trigger: new pending message.** Push fires when a compose
   completes. Consumes fire no push.
 - **Payload is empty.** Body: `{ }`. The fan-out carries no slug,
