@@ -437,11 +437,34 @@ display it in any casing it likes.
 The code is not signed and not cryptographically opaque. It's a
 short random pointer into META state: the server remembers it for
 ≤ `SUBMIT_DEADLINE` minutes and accepts a rally-compose that
-matches it. 20-bit space (≈ 1M). The threat model — "someone
-forges a reply to a random confession" — is speculative and the
-harm is bounded, so 4 chars is deliberately chosen over 6-8 chars
-of cryptographic opacity. Rate limiting at the edge handles
+matches it. 20-bit space (≈ 1M).
+
+**Why 4 chars is enough.** The threat — "someone forges a reply
+to a random confession" — isn't worth designing against. An
+attacker trying to forge a reply without a legitimate URL would
+have to:
+
+1. Enumerate the ~1M slug namespace (server-generated from a
+   wordlist, not listed anywhere) to find valid slugs — hours of
+   polling against the edge rate limit, learning only which
+   slugs exist in pending state.
+2. Catch a specific target slug in its 7-minute reply-window
+   state (which is most of the slug's lifetime only if it gets
+   revealed promptly; otherwise the window never opens).
+3. Brute-force the 4-char code against that slug — ~4% hit
+   probability per attempt burst at 100 req/sec.
+4. Compose… a random reply to a stranger's confession. No
+   money, no data, no power, no identity unmasked.
+
+The compound probability and the zero reward put this attack
+below the noise floor of realistic threats. 4 chars is deliberate,
+not grudging. Rate limiting at the edge handles any accidental
 abuse. No HMAC, no signing key, no SSM secret to manage.
+
+Anyone with a legitimate slug URL already has URL-as-credential
+access — they don't need to brute-force anything. And sharing
+the URL during a reply window is an explicit user choice (the
+cross-device copy-paste hand-off is a feature).
 
 ## Reply window — time spans
 
