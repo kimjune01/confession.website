@@ -8,10 +8,11 @@ Implementation target. Principles and stakes live in
 ### Server — DynamoDB
 
 One table. Composite key: `PK = slug#<id>`, `SK = META | NODE#<seq> |
-SUB#<endpoint_hash>`. Two GSIs. One S3 bucket for audio blobs.
+SUB#<endpoint_hash>`. No GSIs. One S3 bucket for audio blobs.
+DynamoDB TTL on `expires_at` handles all cleanup.
 
-**META** — one per slug. Created on first-turn compose, destroyed on
-the expiry sweep.
+**META** — one per slug. Created on first-turn compose, destroyed
+by DDB TTL ~48 h after `expires_at`.
 
 ```
 PK         = slug#<id>
@@ -20,11 +21,12 @@ tail_seq   : int             — seq of the current tail NODE
 tail_burned: bool            — current tail has been stubbed
 terminal   : bool            — channel permanently closed (text-only consume)
 created_at : ISO8601
-expires_at : int (epoch)     — created_at + 7d; also gsi_expires PK
+expires_at : int (epoch)     — created_at + 7d; DDB TTL attribute
 ```
 
 **NODE** — one per turn. Zero-padded seq for lexicographic sort order.
-Never deleted individually; erased with the slug on the expiry sweep.
+Never deleted individually; erased by DDB TTL alongside the rest of
+the slug.
 
 ```
 PK              = slug#<id>
@@ -37,25 +39,17 @@ burned          : bool                 — content has been stubbed
 reveal_in_flight: bool                 — reveal lock; seq-scoped by schema placement
 reveal_deadline : int (epoch) | absent — lease expiry
 reveal_nonce    : bytes | absent       — lease owner; 16B random minted on acquire
-cleanup_pending : int (epoch) | absent — S3 delete outstanding; also gsi_cleanup PK
 msg_id          : string               — 16B client-generated hex; dedup + idempotency
+expires_at      : int (epoch)          — same as META.expires_at; DDB TTL attribute
 ```
-
-`cleanup_pending` is present exactly when a node has been burned but
-its S3 audio object has not yet been confirmed deleted. Stored as an
-epoch so the reaper GSI has scan-friendly variation. Text-only burns
-still set `cleanup_pending`; the reaper's `DeleteObject` is a no-op
-against a missing key, keeping the reaper path uniform.
 
 Field hygiene on burn:
 
 - `text` is `REMOVE`'d in the burn transaction. Absence is the
   invariant.
-- `audio_s3_key` **persists past burn** as a delete-pending pointer.
-  The cleanup reaper reads it, calls `DeleteObject` on S3, then
-  `REMOVE`s `audio_s3_key` and `cleanup_pending` together. The
-  authoritative "content nulled" signal is `burned = true`, not the
-  absence of `audio_s3_key`.
+- `audio_s3_key` is `REMOVE`'d in the burn transaction. The reveal
+  Lambda holds the key in memory through the synchronous S3
+  `DeleteObject` that follows the burn commit.
 - `reveal_nonce` and `reveal_deadline` are `REMOVE`'d in the burn
   transaction along with `reveal_in_flight = false`.
 
@@ -68,26 +62,29 @@ below.
 **SUB** — web push subscription. Plural per slug.
 
 ```
-PK       = slug#<id>
-SK       = SUB#<first8hex(sha256(endpoint))>
-endpoint : string
-p256dh   : string
-auth     : string
-added_at : ISO8601
+PK         = slug#<id>
+SK         = SUB#<first8hex(sha256(endpoint))>
+endpoint   : string
+p256dh     : string
+auth       : string
+added_at   : ISO8601
+expires_at : int (epoch)   — same as META.expires_at; DDB TTL attribute
 ```
 
 `SK` is deterministic from `endpoint`, so duplicate subscribes are a
-conditional put → at most one entry per endpoint. Plurality capped at
-**N=4** per slug; subscribes past the cap evict the oldest by
+conditional put → at most one entry per endpoint. Plurality capped
+at **N=4** per slug; subscribes past the cap evict the oldest by
 `added_at`.
 
-**GSIs:**
+**Expiry via DDB TTL.** Every item (META, NODE, SUB) carries the
+same `expires_at` value on creation — copied from META at rally
+compose (via reply_token, see below) and at subscribe time (via
+`GetItem` META). DynamoDB TTL is configured on `expires_at`; each
+item is deleted independently within ~48 hours of its TTL. No cron,
+no sweeper Lambda, no GSI on `expires_at`.
 
-- `gsi_expires` — sparse, indexes only META items. PK = `expires_at`
-  (epoch). Sweeper queries by epoch range.
-- `gsi_cleanup` — sparse, indexes only NODE items with
-  `cleanup_pending` present. PK = `cleanup_pending` (epoch). Reaper
-  queries by epoch range.
+API handlers filter reads by `expires_at > :now` on every code path.
+Items past TTL but not yet deleted look identical to absent items.
 
 **Atomicity contracts.** Every mutating path includes
 `expires_at > :now` on META. An expired slug fails every mutation.
@@ -113,10 +110,10 @@ conditional put → at most one entry per endpoint. Plurality capped at
 - **Reveal — commit burn** — one `TransactWriteItems`:
   - `Update NODE#<seq>`, cond `reveal_in_flight = true AND
     reveal_nonce = :fresh_nonce AND burned = false`; set
-    `burned = true, reveal_in_flight = false, cleanup_pending = :now`;
-    `REMOVE text, reveal_nonce, reveal_deadline`.
-    `audio_s3_key` is intentionally **not** removed — the reaper
-    needs it.
+    `burned = true, reveal_in_flight = false`;
+    `REMOVE text, audio_s3_key, reveal_nonce, reveal_deadline`.
+    The Lambda holds `audio_s3_key` in memory for the synchronous
+    S3 delete that follows this transaction.
   - `Update META`, cond `tail_seq = :seq AND tail_burned = false AND
     expires_at > :now`; set `tail_burned = true,
     terminal = :was_text_only`.
@@ -205,8 +202,9 @@ free), never on the wire.
   `audio/webm; codecs=opus`. Anything else is 400.
 - `text` ≤ 280 chars (UTF-8, post-NFC normalization at parse).
 - `msg_id` is exactly 32 lowercase hex characters (16 bytes).
-- `reply_token` base64url decodes to exactly 28 bytes
-  (4 seq + 8 exp + 16 hmac). Non-canonical base64url is rejected.
+- `reply_token` base64url decodes to exactly 36 bytes
+  (4 seq + 8 exp + 8 slug_exp + 16 hmac). Non-canonical base64url
+  is rejected.
 
 ### `GET /api/slug/<id>`
 
@@ -214,9 +212,14 @@ Probe. Bare body — no metadata leakage (not even `has_audio` /
 `has_text`).
 
 ```
-200 { }    — META exists AND tail pending AND not terminal AND not expired
-404 { }    — everything else
+200 { }    — META exists AND tail pending AND not terminal AND expires_at > :now
+404 { }    — everything else (including META still present but TTL lag)
 ```
+
+The `expires_at > :now` check is in code, not a condition
+expression — a `GetItem` with a post-read filter. This closes the
+≤48 h TTL lag window during which an expired META might still exist
+in the table.
 
 ### `POST /api/slug/<id>/reveal`
 
@@ -243,15 +246,21 @@ response 404: any other state (never-existed, burned-empty,
 1. **Acquire lock** on `NODE#<tail_seq>`. Mint `:fresh_nonce` for
    this Lambda invocation. Issue `UpdateItem` with
    `ReturnValues = ALL_NEW` to read back the NODE state (audio key,
-   text, msg_id, seq). On condition failure: 404.
+   text, msg_id, seq) plus META's `expires_at` (via a separate
+   `GetItem` on META or fold it into the ALL_NEW return if the
+   Lambda is batching). On condition failure: 404.
 2. **Read audio** from S3 if `audio_s3_key` present. On failure:
    best-effort clear `reveal_in_flight` (conditional on the same
    nonce), return 404.
 3. **Commit burn** via `TransactWriteItems` as described above,
-   carrying `:fresh_nonce` in the NODE condition.
-4. **Mint `reply_token`** — see [Reply token format](#reply-token-format).
+   carrying `:fresh_nonce` in the NODE condition. On failure:
+   return 404. **Do not return content, do not delete S3.**
+4. **Sync `DeleteObject` S3** using the in-memory `audio_s3_key`.
+   On failure: log content-free, continue. S3 lifecycle catches
+   orphans within 8 days.
+5. **Mint `reply_token`** — see [Reply token format](#reply-token-format).
    `null` if the burn set `terminal = true`.
-5. **Return body** containing content bytes (as base64) and token.
+6. **Return body** containing content bytes (as base64) and token.
 
 **At-most-once delivery, sharpened.** If the burn transaction in
 step 3 commits but the response never reaches the client (disconnect,
@@ -292,16 +301,17 @@ response 404: slug state rejects this token and the NODE at
 2. **Upload audio** (if present) to S3 at a fresh key
    `audio/<slug_id>/<16-hex>.opus`. Keep the key in Lambda memory.
 3. **Write** via `TransactWriteItems` (the `Put NODE` sets
-   `msg_id`, `audio_s3_key`, `text`).
+   `msg_id`, `audio_s3_key`, `text`, and `expires_at = token.slug_exp`
+   — same TTL as META).
 4. **On success:** 201 `{ }`, then fan out push to all `SUB#...`
    items for this slug, payload `{ msg_id }`. Return.
 5. **On `ConditionalCheckFailed`:** run the idempotency handler —
    see [Idempotency via msg_id](#idempotency-via-msg_id). Either
    returns 201 (matching retry) or 404 (real state drift).
 
-No DynamoDB read on the hot path before the write — the global
-signing key makes token verify purely local. The only read happens
-on the rare idempotency branch.
+No DynamoDB read on the hot path before the write — the signed
+token carries everything the write needs: tail seq, slug TTL, and
+the HMAC that proves both came from the same reveal.
 
 `reply_token` authorizes any compose modality. Modality determines
 the *next* state (text-only → next consume sets `terminal = true`),
@@ -327,13 +337,15 @@ response 409: real slug collision (NODE#000001 msg_id does not match)
 **Sequence:**
 
 1. **Validate** content, sizes, msg_id format.
-2. **Upload audio** (if present) to S3.
-3. **Write** via `TransactWriteItems` creating META (`tail_seq=1,
+2. **Upload audio** (if present) to S3 at `audio/<slug_id>/<16-hex>.opus`.
+3. Compute `:expires = :now + 7 days`.
+4. **Write** via `TransactWriteItems` creating META (`tail_seq=1,
    tail_burned=false, terminal=false, created_at=:now,
-   expires_at=:now+7d`) and NODE#000001 (with request's `msg_id`).
+   expires_at=:expires`) and NODE#000001 (with request's `msg_id`,
+   `audio_s3_key`, `text`, `expires_at=:expires`).
    `attribute_not_exists(PK)` on the META Put is the collision guard.
-4. **On success:** 201 `{ }`.
-5. **On `ConditionalCheckFailed`:** run the idempotency handler —
+5. **On success:** 201 `{ }`.
+6. **On `ConditionalCheckFailed`:** run the idempotency handler —
    see below. Either returns 201 (matching retry) or 409 (real
    collision).
 
@@ -382,18 +394,24 @@ response 404: slug doesn't exist or is expired
 
 Idempotent per endpoint. Plurality cap N=4 enforced by
 `Query(PK = slug#<id>, SK begins_with SUB#)` + count + evict-oldest
-if at cap.
+if at cap. The SUB item is written with `expires_at` copied from
+META so DDB TTL cleans it up with the rest of the slug — this
+requires one `GetItem` on META per subscribe, acceptable because
+subscribe is a once-per-session-per-device operation, not on any
+hot path.
 
 ## Reply token format
 
 ```
-reply_token = base64url( seq_be || exp_be || hmac )     — 28 bytes decoded
-  seq_be : 4 bytes, big-endian (matches NODE.seq)
-  exp_be : 8 bytes, big-endian unix epoch
-  hmac   : 16 bytes = HMAC-SHA256(
-             server_key,
-             "reply|" || slug_id || "|" || seq_be || "|" || exp_be
-           )[:16]
+reply_token = base64url( seq_be || exp_be || slug_exp_be || hmac )  — 36 bytes decoded
+  seq_be      : 4 bytes, big-endian (matches NODE.seq)
+  exp_be      : 8 bytes, big-endian unix epoch (token expiry)
+  slug_exp_be : 8 bytes, big-endian unix epoch (slug TTL, META.expires_at)
+  hmac        : 16 bytes = HMAC-SHA256(
+                  server_key,
+                  "reply|" || slug_id || "|" || seq_be || "|" || exp_be
+                              || "|" || slug_exp_be
+                )[:16]
 ```
 
 - `slug_id` is the canonical form (see
@@ -408,14 +426,18 @@ reply_token = base64url( seq_be || exp_be || hmac )     — 28 bytes decoded
   [Reply window](#reply-window--time-spans)).
 - `exp = min(reveal_time + SUBMIT_DEADLINE, slug.expires_at)`, where
   `reveal_time` is the server wall clock at burn-commit.
+- `slug_exp` carries META's `expires_at` verbatim so rally-compose
+  can stamp the new NODE's TTL attribute without reading META.
+  Signed along with `exp` and `seq` to prevent tampering.
 - Verification:
-  1. Base64url decode. Reject if length ≠ 28 or encoding is not
+  1. Base64url decode. Reject if length ≠ 36 or encoding is not
      canonical base64url (no padding, URL-safe alphabet).
-  2. Split into `seq_be || exp_be || hmac`.
+  2. Split into `seq_be || exp_be || slug_exp_be || hmac`.
   3. Recompute HMAC over the same canonical input, constant-time
      compare.
   4. Check `exp > :now`.
   5. Parse `seq` as the `:token_seq` binding in the DDB condition.
+  6. Use `slug_exp` as the NODE's `expires_at` on write.
 - No per-slug secret. No DDB read on the compose hot path.
 
 128-bit truncated MAC is fine at this threat model — tokens are
@@ -597,41 +619,52 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
 - **Cross-device caveat.** Push lives on the browser that subscribed.
   Visiting the slug from another device still works; only the
   subscribed browser rings.
-- **Subscription dies with the slug.** `SUB#` items are erased in
-  the expiry sweep along with META and NODEs.
+- **Subscription dies with the slug.** `SUB#` items carry the same
+  `expires_at` as META and are erased by DDB TTL alongside the rest
+  of the slug.
 
 ## Architecture
 
 - **Own domain.** Both parties visit `confession.website`. Link is
   `confession.website/<slug>`.
 - **Own state.** Single DynamoDB table. Single S3 bucket for audio.
-  Two GSIs (`gsi_expires`, `gsi_cleanup`). Single Lambda for the API.
+  No GSIs. Single Lambda for the API. No cron, no background
+  workers, no stream processors.
 - **Stack.** Go Lambda + DynamoDB + S3 + CloudFront. Mirrors
   ephemeral.website. Any equivalent is fine.
-- **Background jobs.**
-  - **Expiry sweeper** — cron, every 10 min. Queries `gsi_expires`
-    for METAs with `expires_at ≤ :now`. For each slug:
-    1. `Query(PK = slug#<id>)` paginated.
-    2. For each NODE with `audio_s3_key` present, `DeleteObject`.
-    3. `BatchWriteItem` delete all NODE and SUB items in 25-item
-       chunks.
-    4. **Delete META last.** The META row is the source of truth
-       for `gsi_expires`; if it's deleted before the other items,
-       a crash at any point afterwards orphans them beyond the
-       sweeper's reach. META-last makes the sweep crash-safe —
-       a crashed run leaves the slug re-discoverable via
-       `gsi_expires` on the next cron tick.
-    Idempotent across runs.
-  - **Cleanup reaper** — cron, every 5 min. Queries `gsi_cleanup`
-    for NODEs with `cleanup_pending ≤ :now`. For each:
-    1. Read `audio_s3_key` (it persists past burn specifically for
-       this reason).
-    2. `DeleteObject` S3. NoSuchKey is a success.
-    3. `UpdateItem` `REMOVE audio_s3_key, cleanup_pending` on the
-       NODE.
-    Idempotent — a partial-failure rerun converges, because step 3
-    only runs after step 2 succeeded, and the GSI sparse index
-    drops the item once `cleanup_pending` is removed.
+- **Cleanup is infrastructure, not code.**
+  - **DDB TTL** is configured on the `expires_at` attribute. Every
+    item (META, NODE, SUB) carries the same `expires_at` value on
+    creation. DynamoDB deletes each item independently within ~48 h
+    of TTL. No sweeper Lambda, no GSI, no pagination logic.
+  - **S3 lifecycle rule** on the audio bucket: delete any object
+    under the `audio/` prefix **8 days after creation**. This is
+    the 7-day slug ceiling plus a 1-day margin. Audio objects can
+    reach this cleanup path in two cases:
+    1. **Slug expired without reveal.** The audio was never
+       listened to. Nobody held the slug's reply token, nobody
+       fetched the object. The lifecycle is the only path that ever
+       removes it.
+    2. **Reveal happened but the sync `DeleteObject` failed.** The
+       audio was consumed and burned in DDB, but the Lambda's
+       follow-up delete didn't land. This is the only case where
+       "burned" and "still in S3" can coexist, and only until the
+       lifecycle fires.
+  - **Reveal Lambda does synchronous S3 `DeleteObject`** after the
+    burn transaction commits (step 4 of the reveal sequence). Happy
+    path: burned audio is gone from S3 within seconds of burn, not
+    days. The 8-day lifecycle is the failure-mode fallback, not the
+    primary cleanup path.
+- **The 8-day fallback is principled, not lazy.** Data that never
+  reached anyone cannot cause harm by lingering a week. Subpoenaing
+  untouched audio — content nobody accessed, nobody listened to, and
+  which existed only because a sender spoke into a void — would be
+  a speculative fishing expedition against data that produced no
+  effect in the world. If that standard were applied to any
+  messaging platform, every draft, every unsent message, every
+  unloaded push notification would be subpoena-eligible. The medium
+  takes the position that unaccessed data is not evidence of
+  anything.
 - **Minimal logs, aggressively scoped.** No access logs, no
   application logs of message content, no behavioral analytics, no
   X-Ray traces capturing payloads, no visitor tracking. Content,
@@ -691,6 +724,12 @@ auto-collapses to 404. `reply_capability` is cleared. Turn lost.
 - Distinguishable error codes for non-pending states. `no_pending`,
   `terminated`, `expired`, and `in_flight` collapse to a single
   `404` on the wire.
+- Cron jobs, cleanup workers, stream processors, or any
+  application-level background process. Cleanup is handled by DDB
+  TTL and S3 lifecycle — infrastructure, not code.
+- GSIs. The primary table's PK/SK covers every access pattern.
+  Neither the sweeper nor the reaper exists, so nothing needs
+  secondary indexing.
 - Content, slug IDs, or reply text in any log, metric, or trace.
 - Retained access logs, behavioral analytics, or visitor tracking.
 - Anything a subpoena or takedown notice could usefully request.

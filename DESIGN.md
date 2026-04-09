@@ -59,6 +59,19 @@ unreachable.
   the platform has nothing to produce. "Platform" is in scare quotes —
   nobody should be able to come after it because there's no *it* to
   come after.
+- **Unaccessed data is not evidence.** Burned audio is deleted from
+  storage within seconds of the burn, synchronously. Audio that was
+  *never* listened to — someone spoke into a void, nobody came — is
+  cleaned up by infrastructure lifecycle, not by application code.
+  The untouched object may sit in storage for a few days before the
+  lifecycle runs. This is fine. Subpoenaing data that nobody ever
+  accessed, that produced no effect in the world, that exists only
+  because a sender spoke and no one was there, is a speculative
+  fishing expedition on the potential for harm — not on harm itself.
+  Applied consistently, that standard would make every draft, every
+  unsent message, and every unloaded push across every platform
+  subpoena-eligible. The medium takes the position that
+  unaccessed data is not evidence of anything.
 - **Voice is selective identity. No masking, ever.** Refusing to help the
   speaker hide from the listener is principled; masking reproduces
   Sarahah's "anonymity on the wrong side" failure.
