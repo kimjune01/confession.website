@@ -156,12 +156,9 @@ export function render_probe_loading(props = {}) {
 }
 
 export function render_probe_404() {
-    const frame = brandFrame(copy.NOTHING_HERE, copy.NOTHING_HERE);
+    const frame = brandFrame(copy.NOTHING_HERE, "");
     frame.classList.add("is-empty");
-    const note = cloneTemplate("tpl-empty");
-    note.querySelector(".inline-note").textContent = copy.NOTHING_HERE;
-    note.querySelector('[data-action="dismiss"]').hidden = true;
-    frame.querySelector(".surface-body").append(note);
+    frame.querySelector(".rules").hidden = true;
     return frame;
 }
 
