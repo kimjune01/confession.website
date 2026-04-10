@@ -3,10 +3,9 @@
 One listen, then gone.
 
 Record a voice message, get a link, hand it to one person. They hear it
-once — the audio is deleted on play. If they want to reply, a 5-minute
-window opens. Audio keeps the rally going; text ends the channel.
-
-No accounts, no feed, no inbox. The URL is the whole credential.
+once — the audio is deleted on play. They can reply with their voice,
+or close the channel with text. No accounts, no feed, no inbox. The
+URL is the whole credential.
 
 ## Layout
 

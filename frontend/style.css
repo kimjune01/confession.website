@@ -794,6 +794,26 @@ input {
 }
 
 
+/* Colophon: "what is this · AGPL-3" at the bottom of the landing page. */
+.colophon {
+    color: rgba(231, 221, 199, 0.22);
+    font-size: 0.8rem;
+    font-style: italic;
+    text-align: center;
+    margin-top: auto;
+    padding: var(--sp-3) 0;
+}
+
+.colophon a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.25s;
+}
+
+.colophon a:hover {
+    color: rgba(231, 221, 199, 0.45);
+}
+
 /* Utility: hide an element while preserving its layout space.
  * Used by JS to toggle visibility without disrupting flow. */
 .is-invisible { visibility: hidden; }

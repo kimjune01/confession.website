@@ -185,6 +185,11 @@ export function render_landing(props = {}) {
                 ? copy.RECORD_CAPTION_RECORDING
                 : copy.RECORD_CAPTION_READY,
     });
+    // Colophon: subtle links at the bottom of the landing page
+    const colophon = document.createElement("div");
+    colophon.className = "colophon";
+    colophon.innerHTML = '<a href="https://june.kim/i-am-now-sending-to-you">what is this</a> · <a href="https://github.com/kimjune01/confession.website">AGPL-3</a>';
+    frame.querySelector(".surface").append(colophon);
     return frame;
 }
 
