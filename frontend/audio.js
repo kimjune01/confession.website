@@ -191,6 +191,11 @@ export async function startRecording(opts = {}) {
         opts.onTick?.(sec);
         if (opts.maxSeconds && sec >= opts.maxSeconds && recorder?.state === "recording") {
             recorder.stop();
+            // Notify the caller that recording auto-stopped so it can
+            // consume the result (same as a manual stop).
+            if (opts.onAutoStop) {
+                stopPromise?.then((result) => opts.onAutoStop(result));
+            }
         }
     }, 250);
 }
@@ -234,6 +239,9 @@ function startFakeRecording(opts = {}) {
         opts.onTick?.(sec);
         if (opts.maxSeconds && sec >= opts.maxSeconds) {
             stopRecording();
+            if (opts.onAutoStop) {
+                stopPromise?.then((result) => opts.onAutoStop(result));
+            }
         }
     }, 250);
     return Promise.resolve();

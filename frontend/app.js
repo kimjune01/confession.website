@@ -190,11 +190,10 @@ async function dispatch(event, payload = {}) {
         dom.swapSurface(currentState, currentData);
     }
 
-    // Audio plays fully on LISTEN_PLAYING before advancing to the
-    // reply screen. If the user pauses, a 15 s countdown starts —
-    // the play button fades away. Resuming cancels the countdown.
-    // No words; the dying button IS the countdown.
-    if (currentState === State.LISTEN_PLAYING) {
+    // Only bind listeners on state ENTRY (not same-state transitions
+    // like BURN_OK which skip rerender but still reach this code).
+    // Audio plays fully before advancing. 15 s pause countdown.
+    if (currentState === State.LISTEN_PLAYING && prevState !== State.LISTEN_PLAYING) {
         const audioEl = document.querySelector(".played-audio audio");
         if (audioEl) {
             let pauseTimeout = null;
@@ -249,7 +248,7 @@ async function dispatch(event, payload = {}) {
                     if (pushResult?.kind === "push" && pushResult.result) {
                         currentData.pushState = "resolved";
                         currentData.pushReason = resolvePushReason(pushResult.result);
-                        rerender();
+                        await dispatch(Event.PUSH_RESOLVED, {});
                     }
                 }
                 continue;
@@ -314,6 +313,27 @@ async function handleRecordToggle() {
             onLevel: (level) => {
                 setRecordGlow(level);
             },
+            onAutoStop: (recorded) => {
+                // Recording hit the time cap — consume the result
+                // the same way a manual stop would. Guard against
+                // state having moved on (e.g. COUNTDOWN_EXPIRED).
+                if (!recorded) return;
+                if (currentState !== State.LANDING && currentState !== State.POST_LISTEN_RALLY && currentState !== State.POST_LISTEN_RALLY_REFRESH) {
+                    return;
+                }
+                if (currentData.audio?.url) {
+                    URL.revokeObjectURL(currentData.audio.url);
+                }
+                currentData.audio = {
+                    ...recorded,
+                    url: URL.createObjectURL(recorded.blob),
+                };
+                currentData.recording = false;
+                currentData.recordSeconds = recorded.durationSec;
+                currentData.status = "";
+                setRecordGlow(0);
+                syncLiveComposer();
+            },
         });
     } catch (error) {
         if (error instanceof NoMicError || error instanceof PermissionDeniedError) {
@@ -367,9 +387,15 @@ function installClickHandlers() {
             return;
         }
         if (name === "show-text") {
+            action.disabled = true;
             const slug = window.location.pathname.replace(/^\/+/, "");
             const result = await api.listen(slug);
             if (!result.ok) {
+                if (result.reason === "network") {
+                    // Transient — re-enable and let the user retry
+                    action.disabled = false;
+                    return;
+                }
                 currentState = State.PROBE_404;
                 currentData = { slug };
                 dom.swapSurface(currentState, currentData);
@@ -386,6 +412,7 @@ function installClickHandlers() {
             return;
         }
         if (name === "send-text") {
+            if (currentData.sending) return;
             const textarea = document.querySelector(".compose-text");
             const text = textarea?.value?.trim() || "";
             if (!text) {
@@ -393,16 +420,23 @@ function installClickHandlers() {
                 syncLiveComposer();
                 return;
             }
+            action.disabled = true;
             currentData.endText = text;
             await dispatch(Event.END_RALLY_TAP, {});
+            // Re-enable if we're still on the compose screen (send failed)
+            if (currentState === State.POST_LISTEN_RALLY || currentState === State.POST_LISTEN_RALLY_REFRESH) {
+                action.disabled = false;
+            }
             return;
         }
         if (name === "send") {
+            if (currentData.sending) return;
             if (!currentData.audio) {
                 currentData.status = copy.LANDING_STATUS_REQUIRED;
                 syncLiveComposer();
                 return;
             }
+            action.disabled = true;
             await dispatch(Event.SEND_TAP, {});
             return;
         }
@@ -441,7 +475,14 @@ function installClickHandlers() {
             return;
         }
         if (name === "copy-link") {
-            await navigator.clipboard.writeText(currentData.url || "");
+            try {
+                await navigator.clipboard.writeText(currentData.url || "");
+            } catch {
+                // Fallback: select the link field so the user can Cmd+C
+                const linkField = document.querySelector(".link-out");
+                if (linkField) { linkField.select(); }
+                return;
+            }
             action.textContent = "✓";
             action.disabled = true;
             // Persist so rerenders (e.g. after push-subscribe) don't reset
@@ -523,14 +564,23 @@ async function bootstrap() {
         return;
     }
     if (boot.state === State.POST_LISTEN_RALLY_REFRESH) {
-        // Probe first to get reply_code_exp so the countdown can show
-        // a real timer instead of the generic "reply window open" nudge.
-        // If the slug is gone (404), drop to nothing-here immediately.
+        // Probe first: if the slug has a NEW pending message (not
+        // replyable — the old turn was replaced), ignore the stale
+        // fragment and enter the normal listen flow. If replyable,
+        // enter the rally-refresh with the timer.
         const probeResult = await effects.run("fetch-probe", { slug: boot.data.slug });
         if (probeResult?.event === "PROBE_404") {
             currentState = State.PROBE_404;
             currentData = { slug: boot.data.slug };
             rerender();
+            return;
+        }
+        const replyable = Boolean(probeResult?.payload?.replyable);
+        if (!replyable) {
+            // Stale fragment — a new message is waiting. Clear the
+            // hash and enter the listen flow.
+            history.replaceState(null, "", window.location.pathname);
+            dispatch(Event.START_PROBE, { slug: boot.data.slug });
             return;
         }
         const replyCodeExp = probeResult?.payload?.replyCodeExp || null;

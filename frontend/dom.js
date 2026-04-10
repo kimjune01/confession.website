@@ -232,10 +232,18 @@ export function patchFirstSent(props = {}) {
 }
 
 export function render_probe_loading() {
-    // Render the expected headline invisibly to reserve layout height.
-    // The divider is visible from the start. When the probe resolves,
-    // patchFromProbe swaps the headline/body in-place (no surface
-    // replacement) so the divider never moves.
+    // Reuse the initial surface already in the HTML — it has the
+    // divider in its final position from first paint. No new surface
+    // element, no reveal animation, zero layout shift.
+    const existing = document.getElementById("initial-surface");
+    if (existing) {
+        existing.removeAttribute("id");
+        // Remove the reveal animation so the divider doesn't fade
+        existing.style.animation = "none";
+        existing.style.opacity = "1";
+        return existing;
+    }
+    // Fallback for non-slug pages that don't have the initial surface
     const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
     frame.querySelector(".brand-block").style.visibility = "hidden";
     frame.querySelector(".surface-body").style.visibility = "hidden";

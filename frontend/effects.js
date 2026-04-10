@@ -31,7 +31,8 @@ const effectHandlers = {
                 ? result.data.reply_code_exp * 1000
                 : null;
             const hasAudio = Boolean(result.data?.has_audio);
-            return { event: "PROBE_OK", payload: { slug, replyCodeExp, hasAudio } };
+            const replyable = Boolean(result.data?.replyable);
+            return { event: "PROBE_OK", payload: { slug, replyCodeExp, hasAudio, replyable } };
         }
         return { event: "PROBE_404", payload: { slug } };
     },

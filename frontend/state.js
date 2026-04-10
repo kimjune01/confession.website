@@ -58,6 +58,9 @@ function withDraft(payload, extras = {}) {
         ...payload.currentData,
         ...extras,
         sending: extras.sending ?? payload.currentData?.sending ?? false,
+        // Clear the ending flag on failure so a subsequent audio send
+        // isn't misclassified as "channel ended".
+        ending: extras.ending ?? false,
     };
 }
 
