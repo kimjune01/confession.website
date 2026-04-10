@@ -23,10 +23,10 @@ function formatRemaining(remainingMs) {
     if (remainingMs <= 0) return "";
     if (remainingMs >= 60000) {
         const minutes = Math.min(5, Math.ceil(remainingMs / 60000));
-        return `${minutes} minute${minutes === 1 ? "" : "s"} left to reply`;
+        return `${minutes} minute${minutes === 1 ? "" : "s"} left`;
     }
     const seconds = Math.ceil(remainingMs / 1000);
-    return `${seconds} second${seconds === 1 ? "" : "s"} left to reply`;
+    return `${seconds} second${seconds === 1 ? "" : "s"} left`;
 }
 
 function appendCompose(target, props) {
@@ -58,8 +58,10 @@ function appendCompose(target, props) {
         status.textContent = props.status;
     }
 
+    // Countdown and record-time share the same grid slot (.record-status).
+    // Toggle visibility so the occupied space stays constant.
+    countdown.classList.toggle("is-invisible", !props.phase);
     if (props.phase) {
-        countdown.hidden = false;
         phase.textContent = props.phase.replaceAll("-", " ");
         time.textContent = formatRemaining(props.remainingMs);
         if (props.phase === "overtime") {
@@ -482,7 +484,7 @@ export function syncComposer(props = {}) {
     }
 
     if (countdown && phase && time) {
-        countdown.hidden = !props.phase;
+        countdown.classList.toggle("is-invisible", !props.phase);
         phase.textContent = props.phase ? props.phase.replaceAll("-", " ") : "";
         time.textContent = props.phase ? formatRemaining(props.remainingMs) : "";
         compose.classList.toggle("is-overtime", props.phase === "overtime");
