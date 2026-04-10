@@ -61,16 +61,26 @@ body {
     font-size: 18px;
     line-height: 1.5;
     background-color: var(--ink-1);
-    /* Two layers painted over the ink:
+    /* Background layers, topmost first:
      *   1. Fleuron dingbats (❦) at the diagonal cells of a 2×2 checker,
      *      so the marks trace a continuous diagonal drift across the page.
      *   2. Warm parchment-tinted fractal noise for paper grain.
-     * Both are inline SVG data URIs — no extra assets to ship. */
+     *   3-6. Four radial gradients pinned to the corners for a Telegram-
+     *        style freeform-gradient approximation. Each contributes a
+     *        subtle tint that bleeds toward the center, so the surface
+     *        reads as dimensional rather than flat. Colors drawn from
+     *        the existing palette: deep blue top-left, dim crimson
+     *        top-right, warm bronze bottom-left, deepest ink bottom-right. */
     background-image:
         url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><g font-family='Georgia,serif' font-size='30' fill='%23c9a44c' fill-opacity='0.13' text-anchor='middle'><text x='60' y='76'>&#10086;</text><text x='180' y='196'>&#10086;</text></g></svg>"),
-        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.78  0 0 0 0 0.58  0 0 0 0.09 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    background-repeat: repeat, repeat;
-    background-size: 240px 240px, 200px 200px;
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.78  0 0 0 0 0.58  0 0 0 0.09 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+        radial-gradient(ellipse 70% 55% at 0% 0%, rgba(32, 48, 96, 0.19), transparent 70%),
+        radial-gradient(ellipse 60% 50% at 100% 0%, rgba(80, 22, 46, 0.14), transparent 65%),
+        radial-gradient(ellipse 60% 50% at 0% 100%, rgba(62, 42, 14, 0.12), transparent 65%),
+        radial-gradient(ellipse 80% 60% at 100% 100%, rgba(0, 0, 4, 0.28), transparent 70%);
+    background-repeat: repeat, repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+    background-size: 240px 240px, 200px 200px, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+    background-attachment: scroll, scroll, fixed, fixed, fixed, fixed;
     color: var(--parchment);
     min-height: 100vh;
     min-height: 100dvh;
@@ -133,20 +143,40 @@ input {
     font-size: 4.7rem;
     font-weight: 400;
     font-style: italic;
-    /* Debossed: color dropped to burnished bronze so the glyph reads
-     * recessed, then stacked shadows do the sculptural work.
-     *   · hard dark line above = the carved lip catching the absence of light
-     *   · soft dark blur above = depth of the depression
-     *   · hard pale line below = the far rim catching the light
-     *   · soft pale glow below = bounce from the rim
-     */
-    color: #cbbc97;
-    line-height: 1.05;
+    line-height: 1.15;
+    /* Extra bottom padding so background-clip: text has room to fill
+     * Charter italic's f descender, which extends below the baseline
+     * further than the tight line-height would normally allow. */
+    padding-bottom: 0.1em;
+    /* True debossed effect: the glyph itself has a vertical gradient
+     * fill running dark → base → bright. The top of every letterform
+     * sits in the shadow of its own lip; the bottom catches light
+     * bouncing off the far rim. Combined with the text-shadow halo
+     * (dark above, warm below the glyph), the two layers sell the
+     * "pressed into the midnight surface" illusion.
+     *
+     * Technique: transparent text color + gradient background clipped
+     * to the glyph shape via `background-clip: text`. Supported
+     * everywhere with the -webkit- prefix as a safety net. */
+    /* Debossed: bright parchment-cream fill with a gentle curved-
+     * surface gradient. Shadow is minimal — just enough to suggest
+     * a lip above and a rim-light below without eating contrast. */
+    color: #d8c8a0;
+    background-image: linear-gradient(
+        180deg,
+        #c0a878 0%,
+        #c0a878 43%,
+        #e0d0a8 58%,
+        #f5edd5 75%,
+        #fdf8ee 100%
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
     text-shadow:
-        0 -2px 0 rgba(0, 0, 0, 1),
-        0 -4px 8px rgba(0, 0, 0, 0.9),
-        0 2px 0 rgba(255, 240, 210, 0.3),
-        0 4px 5px rgba(255, 240, 210, 0.08);
+        0 -1px 1px rgba(0, 0, 0, 0.2),
+        0 1px 1px rgba(255, 248, 225, 0.35),
+        0 0 12px rgba(220, 200, 150, 0.12);
 }
 
 /* Prose fragments — italic, parchment-dim */
@@ -196,9 +226,11 @@ input {
     margin-top: -0.5rem;
 }
 
-/* Stylized horizontal divider: thin line flanked by squiggle arrows
- * (U+21DC leftwards, U+21DD rightwards) pointing outward. Both the
- * line and the ornaments inherit a single color via `currentColor`. */
+/* Stylized horizontal divider: thin line flanked by black-feathered
+ * arrows (U+27B8) pointing outward. Unicode only has the rightward
+ * form, so the left end is CSS-flipped via scaleX(-1) to mirror it.
+ * Both the line and the ornaments inherit a single color via
+ * `currentColor`. */
 .divider {
     display: flex;
     align-items: center;
@@ -210,17 +242,25 @@ input {
 
 .divider-line {
     flex: 1;
-    height: 1px;
-    background: currentColor;
+    /* 3 px tall gives the SVG path room to breathe. Path ends are 2 px
+     * thick (ellipse-capped) and the middle bulges to the full 3 px —
+     * ~50% wider in the middle, as requested. */
+    height: 3px;
+    display: block;
+    color: inherit;
 }
 
 .divider-end {
-    font-size: 1.15rem;
+    font-size: 1.5rem;
     line-height: 1;
     flex-shrink: 0;
-    /* Raise the glyphs a hair so their optical center aligns with the
-     * thin hairline rather than their baseline sitting on it. */
-    transform: translateY(-1px);
+    /* No translateY — glyphs sit on their natural baseline. */
+}
+
+.divider-end-left {
+    /* Mirror the feathered arrow horizontally so it points left
+     * (outward) instead of right. */
+    transform: scaleX(-1);
 }
 
 .compose-card.is-overtime {
