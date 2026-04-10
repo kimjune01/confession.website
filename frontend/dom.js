@@ -256,6 +256,8 @@ export function render_probe_loading() {
 // Patch the existing PROBE_LOADING surface in-place: update the
 // headline and body content without replacing the surface element.
 // The divider stays in the DOM untouched — zero layout shift.
+let patchGeneration = 0;
+
 // General in-place surface patch: render the target state, transplant
 // headline + body into the existing surface. The divider stays in the
 // DOM untouched — zero layout shift. Returns false if the target state
@@ -316,6 +318,7 @@ export function patchSurface(name, props = {}, { fadeDuration = 0.5, fadeHeadlin
 
     const ms = fadeDuration * 1000;
     const easing = `opacity ${fadeDuration}s cubic-bezier(0.25, 0.1, 0.25, 1)`;
+    const gen = ++patchGeneration;
     if (fadeHeadline && brandBlock) {
         brandBlock.style.transition = easing;
         brandBlock.style.opacity = "0";
@@ -324,7 +327,11 @@ export function patchSurface(name, props = {}, { fadeDuration = 0.5, fadeHeadlin
         body.style.transition = easing;
     }
     if (fadeHeadline) {
-        setTimeout(swapAndFadeIn, ms);
+        setTimeout(() => {
+            // Stale guard: if another transition fired during the
+            // fade-out window, abort this delayed swap.
+            if (gen === patchGeneration) swapAndFadeIn();
+        }, ms);
     } else {
         // No headline fade — swap content immediately, only body fades in
         swapAndFadeIn();
@@ -424,15 +431,33 @@ export function render_rally_sent(props = {}) {
     const frame = brandFrame(headline, rules);
     const card = cloneTemplate("tpl-rally-sent");
     const note = card.querySelector(".inline-note");
-    note.textContent = props.ended ? "" : copy.RALLY_SENT_NOTE;
-    note.hidden = !note.textContent;
-    // An ended channel doesn't accept further pushes — skip the prompt.
-    if (!props.ended) {
-        renderPushPrompt(card, props);
+
+    if (props.ended) {
+        note.hidden = true;
+        const prompt = card.querySelector(".push-prompt");
+        if (prompt) prompt.hidden = true;
+    } else if (props.pushAvailable) {
+        // Push not yet granted — show CTA
+        note.textContent = "want to know when they reply?";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "send-btn";
+        btn.dataset.action = "push-now";
+        btn.textContent = "get notified";
+        btn.style.cssText = "align-self:center;width:70%;margin-top:var(--sp-3)";
+        card.append(btn);
+        const prompt = card.querySelector(".push-prompt");
+        if (prompt) prompt.hidden = true;
+    } else if (props.pushGranted) {
+        note.textContent = "you'll be notified when they reply.";
+        const prompt = card.querySelector(".push-prompt");
+        if (prompt) prompt.hidden = true;
     } else {
+        note.textContent = "check the link later to see if they replied.";
         const prompt = card.querySelector(".push-prompt");
         if (prompt) prompt.hidden = true;
     }
+
     frame.querySelector(".surface-body").append(card);
     return frame;
 }
@@ -537,22 +562,6 @@ export function syncComposer(props = {}) {
         sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : copy.SEND_AUDIO_LABEL;
         sendBtn.disabled = props.sending || !hasAudio;
     }
-}
-
-export function disable(el) {
-    if (el) {
-        el.disabled = true;
-    }
-}
-
-export function enable(el) {
-    if (el) {
-        el.disabled = false;
-    }
-}
-
-export function textFor(key) {
-    return copy[key];
 }
 
 export function cloneTemplate(id) {

@@ -153,27 +153,60 @@ export function transition(current, event, payload = {}) {
             // fragment NOW (not on PEEK_OK, where it didn't exist yet).
             if (current !== State.LISTEN_PLAYING) invalid(current, event);
             if (payload.burnLoser) {
-                // Someone else listened first. Stash the flag — when
-                // audio ends, LISTEN_AUDIO_DONE routes to burn-loser
-                // instead of the reply composer.
+                if (payload.currentData?.audioEnded) {
+                    return {
+                        next: State.POST_LISTEN_BURN_LOSER,
+                        effects: ["clear-fragment", "stop-countdown"],
+                        data: { slug: payload.currentData?.slug || "", content: payload.currentData?.content },
+                    };
+                }
                 return {
                     next: State.LISTEN_PLAYING,
                     effects: [],
                     data: { ...payload.currentData, burnLoser: true },
                 };
             }
-            return {
-                next: State.LISTEN_PLAYING,
-                effects: ["write-fragment"],
-                data: {
+            {
+                const data = {
                     ...payload.currentData,
                     replyCode: payload.replyCode || null,
                     replyCodeExp: payload.replyCodeExp || null,
                     terminated: Boolean(payload.terminated),
-                },
-            };
+                };
+                // If audio already ended while burn was in flight,
+                // advance to POST_LISTEN_RALLY immediately.
+                if (data.audioEnded) {
+                    return {
+                        next: State.POST_LISTEN_RALLY,
+                        effects: ["write-fragment", "start-countdown"],
+                        data: {
+                            ...data,
+                            phase: "calm",
+                            remainingMs: null,
+                            audio: null,
+                            sending: false,
+                            status: "",
+                            canRecord: true,
+                            recording: false,
+                            recordSeconds: 0,
+                        },
+                    };
+                }
+                return {
+                    next: State.LISTEN_PLAYING,
+                    effects: ["write-fragment"],
+                    data,
+                };
+            }
         case Event.BURN_FAILED:
             if (current !== State.LISTEN_PLAYING) invalid(current, event);
+            if (payload.currentData?.audioEnded) {
+                return {
+                    next: State.PROBE_404,
+                    effects: ["clear-fragment", "stop-countdown"],
+                    data: { slug: payload.currentData?.slug || "" },
+                };
+            }
             return {
                 next: State.LISTEN_PLAYING,
                 effects: [],
@@ -192,12 +225,22 @@ export function transition(current, event, payload = {}) {
                     },
                 };
             }
-            // Burn failed or no reply code — show 404.
-            if (payload.currentData?.burnFailed || !payload.currentData?.replyCode) {
+            // Burn failed — show 404.
+            if (payload.currentData?.burnFailed) {
                 return {
                     next: State.PROBE_404,
                     effects: ["clear-fragment", "stop-countdown"],
                     data: { slug: payload.currentData?.slug || "" },
+                };
+            }
+            // Burn still in flight — stay in LISTEN_PLAYING. BURN_OK
+            // will arrive and a subsequent LISTEN_AUDIO_DONE (or the
+            // app can auto-advance from BURN_OK if audio already ended).
+            if (!payload.currentData?.replyCode) {
+                return {
+                    next: State.LISTEN_PLAYING,
+                    effects: [],
+                    data: { ...payload.currentData, audioEnded: true },
                 };
             }
             // Normal path: burn succeeded, reply code available.
@@ -348,13 +391,6 @@ export function transition(current, event, payload = {}) {
             }
             invalid(current, event);
             break;
-        case Event.PUSH_PROMPT_READY:
-            if (current !== State.FIRST_SENT && current !== State.RALLY_SENT) invalid(current, event);
-            return {
-                next: current,
-                effects: [],
-                data: { ...payload.currentData, pushState: "prompt", pushReason: "" },
-            };
         case Event.PUSH_RESOLVED:
             if (current === State.RALLY_SENT) {
                 return {

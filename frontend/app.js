@@ -171,8 +171,13 @@ async function dispatch(event, payload = {}) {
     const prevAudioUrl = currentData.audio?.url;
     const nextAudioUrl = tx.data?.audio?.url;
     const draftAudioUrl = tx.data?._draft?.audio?.url;
+    const prevDraftUrl = currentData._draft?.audio?.url;
     if (prevAudioUrl && prevAudioUrl !== nextAudioUrl && prevAudioUrl !== draftAudioUrl) {
         URL.revokeObjectURL(prevAudioUrl);
+    }
+    // Revoke draft blob URL when _draft is dropped (e.g. SEND_OK success)
+    if (prevDraftUrl && prevDraftUrl !== nextAudioUrl && !tx.data?._draft) {
+        URL.revokeObjectURL(prevDraftUrl);
     }
 
     const prevState = currentState;
@@ -308,19 +313,23 @@ async function dispatch(event, payload = {}) {
             // side responds. The "seal message" click is the gesture.
             if (result.silent) {
                 if (currentState === State.RALLY_SENT && !currentData.ended) {
-                    const pushResult = await effects.run("push-subscribe", { currentData });
-                    if (pushResult?.kind === "push" && pushResult.result) {
-                        currentData.pushState = "resolved";
-                        currentData.pushReason = resolvePushReason(pushResult.result);
-                        await dispatch(Event.PUSH_RESOLVED, {});
-                    }
+                    // Don't auto-subscribe or redirect to 404.
+                    // Stay on RALLY_SENT — it's the terminal screen
+                    // for the replier. Push CTA is shown in the render.
+                    currentData.pushAvailable = typeof Notification !== "undefined" && Notification.permission === "default";
+                    currentData.pushGranted = typeof Notification !== "undefined" && Notification.permission === "granted";
+                    rerender();
                 }
                 continue;
             }
             currentData.pushState = "resolved";
             currentData.pushReason = resolvePushReason(result.result);
-            if (currentState === State.RALLY_SENT && currentData.pushState === "resolved") {
-                await dispatch(Event.PUSH_RESOLVED, {});
+            if (currentState === State.RALLY_SENT) {
+                // Stay on RALLY_SENT — don't redirect to 404.
+                // Update push status and rerender.
+                currentData.pushGranted = result.result?.ok;
+                currentData.pushAvailable = false;
+                rerender();
             } else if (currentState === State.FIRST_SENT) {
                 // Don't rerender — patchFirstSent already handled the
                 // URL, and a full rebuild jankily flashes the screen.
@@ -347,6 +356,10 @@ async function handleRecordToggle() {
     if (recordingState() === "recording") {
         const recorded = await stopRecording();
         if (!recorded) {
+            return;
+        }
+        // Guard: state may have changed while awaiting stopRecording
+        if (currentState !== State.LANDING && currentState !== State.POST_LISTEN_RALLY && currentState !== State.POST_LISTEN_RALLY_REFRESH) {
             return;
         }
         if (currentData.audio?.url) {
@@ -583,23 +596,12 @@ function installClickHandlers() {
             await navigator.share({ url: currentData.url || "", title: "confession.website" });
             return;
         }
-        if (name === "push-yes") {
-            const result = await effects.run("push-subscribe", { currentData });
-            currentData.pushState = "resolved";
-            currentData.pushReason = resolvePushReason(result.result);
-            if (currentState === State.RALLY_SENT) {
-                await dispatch(Event.PUSH_RESOLVED, {});
-            } else {
-                rerender();
-            }
-            return;
-        }
-        if (name === "push-no") {
-            currentData.pushState = "resolved";
-            currentData.pushReason = copy.PUSH_DENIED;
-            if (currentState === State.RALLY_SENT) {
-                await dispatch(Event.PUSH_RESOLVED, {});
-            } else {
+        if (name === "push-now") {
+            action.disabled = true;
+            const pushResult = await effects.run("push-subscribe", { currentData });
+            if (pushResult?.kind === "push" && pushResult.result) {
+                currentData.pushGranted = pushResult.result.ok;
+                currentData.pushAvailable = false;
                 rerender();
             }
             return;
