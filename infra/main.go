@@ -14,6 +14,10 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
+	"github.com/joho/godotenv"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/acm"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/apigatewayv2"
 	"github.com/pulumi/pulumi-aws/sdk/v7/go/aws/dynamodb"
@@ -27,6 +31,21 @@ import (
 const domain = "confession.website"
 
 func main() {
+	// Load VAPID + other secrets from ../.env (project root). The file
+	// is gitignored; it holds the Web Push key pair and the contact
+	// subject. Keeping the private key in a local file instead of
+	// Pulumi encrypted config means deploys don't depend on a live
+	// Pulumi backend subscription for secret decryption.
+	_ = godotenv.Load("../.env")
+
+	vapidPublic := os.Getenv("VAPID_PUBLIC_KEY")
+	vapidPrivate := os.Getenv("VAPID_PRIVATE_KEY")
+	vapidSubject := os.Getenv("VAPID_SUBJECT")
+	if vapidPublic == "" || vapidPrivate == "" || vapidSubject == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT must be set in ../.env")
+		os.Exit(1)
+	}
+
 	pulumi.Run(func(ctx *pulumi.Context) error {
 		// ── S3: audio storage ──
 		audioBucket, err := s3.NewBucket(ctx, "confession-audio", &s3.BucketArgs{
@@ -144,10 +163,17 @@ func main() {
 		}
 
 		// ── Lambda functions ──
+		// rally_compose signs and sends the push, so it needs both
+		// halves of the VAPID pair plus the subject. compose/probe/
+		// listen/subscribe don't push, but sharing one env block keeps
+		// the lambda definitions uniform.
 		lambdaEnv := &lambda.FunctionEnvironmentArgs{
 			Variables: pulumi.StringMap{
-				"META_TABLE":   metaTable.Name,
-				"AUDIO_BUCKET": audioBucket.ID(),
+				"META_TABLE":        metaTable.Name,
+				"AUDIO_BUCKET":      audioBucket.ID(),
+				"VAPID_PUBLIC_KEY":  pulumi.String(vapidPublic),
+				"VAPID_PRIVATE_KEY": pulumi.String(vapidPrivate),
+				"VAPID_SUBJECT":     pulumi.String(vapidSubject),
 			},
 		}
 
@@ -189,13 +215,19 @@ func main() {
 			return err
 		}
 
-		// Site Lambda has no DB/S3 access — no env needed.
+		// Site Lambda has no DB/S3 access, but it does need the VAPID
+		// public key so it can inject it into index.html at serve time.
 		siteFn, err := lambda.NewFunction(ctx, "confession-site", &lambda.FunctionArgs{
 			Runtime:       goRuntime,
 			Handler:       goHandler,
 			Architectures: pulumi.StringArray{goArch},
 			Role:          lambdaRole.Arn,
 			Code:          pulumi.NewFileArchive("../backend/dist/site"),
+			Environment: &lambda.FunctionEnvironmentArgs{
+				Variables: pulumi.StringMap{
+					"VAPID_PUBLIC_KEY": pulumi.String(vapidPublic),
+				},
+			},
 			Timeout:       pulumi.Int(5),
 			MemorySize:    pulumi.Int(128),
 		})

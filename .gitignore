@@ -21,9 +21,14 @@ backend/vendor/
 .DS_Store
 Thumbs.db
 
-# Env
+# Env & secrets
 .env
 .env.*
+# Private key material — VAPID is stored in .env, but add defensive
+# patterns so any accidentally-exported key file doesn't land in git.
+*.key
+*.pem
+secrets/
 
 # Logs
 *.log

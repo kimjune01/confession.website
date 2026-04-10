@@ -11,6 +11,8 @@ import (
 	"context"
 	"embed"
 	"encoding/base64"
+	"html"
+	"os"
 	"path"
 	"strings"
 
@@ -76,6 +78,17 @@ func serve(filename string) (events.APIGatewayV2HTTPResponse, error) {
 	if ext == ".woff2" || ext == ".woff" || ext == ".ttf" || ext == ".otf" {
 		body = base64.StdEncoding.EncodeToString(data)
 		isBase64 = true
+	}
+
+	// Inject the VAPID public key into index.html at serve time. The
+	// key is not a secret — the client uses it to construct the
+	// subscription — but hardcoding it into the static file would
+	// couple the deploy pipeline to the key. html.EscapeString is
+	// belt-and-braces: real VAPID keys are base64url and can't break
+	// out of the attribute, but the escape means a misconfigured
+	// env var can't become an HTML-injection vector.
+	if ext == ".html" {
+		body = strings.ReplaceAll(body, "{{VAPID_PUBLIC_KEY}}", html.EscapeString(os.Getenv("VAPID_PUBLIC_KEY")))
 	}
 
 	return events.APIGatewayV2HTTPResponse{

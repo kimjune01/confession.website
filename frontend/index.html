@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-vapid-public-key="{{VAPID_PUBLIC_KEY}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -23,7 +23,7 @@
 
     <template id="tpl-compose">
         <section class="compose-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <div class="divider" aria-hidden="true"><span class="divider-end">⇜</span><span class="divider-line"></span><span class="divider-end">⇝</span></div>
             <div class="compose-status" hidden></div>
             <div class="countdown-card" hidden>
                 <p class="countdown-phase"></p>
@@ -56,7 +56,7 @@
 
     <template id="tpl-listen-ready">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <div class="divider" aria-hidden="true"><span class="divider-end">⇜</span><span class="divider-line"></span><span class="divider-end">⇝</span></div>
             <button type="button" class="send-btn" data-action="listen">listen just once</button>
             <button type="button" class="ghost-btn" data-action="save-later">save for later</button>
         </section>
@@ -64,7 +64,7 @@
 
     <template id="tpl-content">
         <section class="content-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <div class="divider" aria-hidden="true"><span class="divider-end">⇜</span><span class="divider-line"></span><span class="divider-end">⇝</span></div>
             <div class="played-audio" hidden>
                 <audio preload="metadata"></audio>
                 <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play message">
@@ -95,7 +95,7 @@
 
     <template id="tpl-rally-sent">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <div class="divider" aria-hidden="true"><span class="divider-end">⇜</span><span class="divider-line"></span><span class="divider-end">⇝</span></div>
             <p class="sent-tick">tick.</p>
             <p class="inline-note"></p>
             <div class="push-prompt" hidden>
@@ -110,7 +110,7 @@
 
     <template id="tpl-empty">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <div class="divider" aria-hidden="true"><span class="divider-end">⇜</span><span class="divider-line"></span><span class="divider-end">⇝</span></div>
             <p class="inline-note"></p>
             <div class="compose-actions">
                 <button type="button" class="ghost-btn" data-action="dismiss">dismiss</button>

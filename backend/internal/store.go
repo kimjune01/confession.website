@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -75,6 +76,11 @@ type Store struct {
 	S3          *s3.Client
 	MetaTable   string
 	AudioBucket string
+	// PushClient is reused across all Web Push fan-outs. A single
+	// http.Client is goroutine-safe and pools connections per push
+	// service origin, so repeated pushes to the same browser vendor's
+	// endpoint reuse warmed TLS sessions.
+	PushClient *http.Client
 }
 
 // NewStore initializes the Store from default AWS credentials and the
@@ -106,6 +112,12 @@ func NewStore(ctx context.Context) (*Store, error) {
 		S3:          s3.NewFromConfig(cfg, s3Opts...),
 		MetaTable:   os.Getenv("META_TABLE"),
 		AudioBucket: os.Getenv("AUDIO_BUCKET"),
+		PushClient: &http.Client{
+			// Per-request budget is enforced by context in FanoutPush,
+			// but the client-level timeout is a belt-and-braces cap on
+			// any single send in case the context is misused.
+			Timeout: 2 * time.Second,
+		},
 	}, nil
 }
 
@@ -330,6 +342,20 @@ func (s *Store) QuerySubs(ctx context.Context, slug string) ([]Sub, error) {
 		subs = append(subs, sub)
 	}
 	return subs, nil
+}
+
+// DeleteSub removes a single SUB# item by its primary key. Called by
+// FanoutPush when the push service returns 404 or 410 (subscription
+// is permanently gone and should be cleaned up).
+func (s *Store) DeleteSub(ctx context.Context, pk, sk string) error {
+	_, err := s.DDB.DeleteItem(ctx, &dynamodb.DeleteItemInput{
+		TableName: &s.MetaTable,
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: pk},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: sk},
+		},
+	})
+	return err
 }
 
 // EvictOldestSub deletes the SUB# item with the earliest added_at.

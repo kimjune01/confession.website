@@ -196,26 +196,26 @@ input {
     margin-top: -0.5rem;
 }
 
-/* Stylized horizontal divider: thin line flanked by heavy angular
- * quotation marks (U+276F, U+276E) as decorative ornaments. Pointing
- * inward frames the line as a single mark, not a bare rule. */
+/* Stylized horizontal divider: thin line flanked by squiggle arrows
+ * (U+21DC leftwards, U+21DD rightwards) pointing outward. Both the
+ * line and the ornaments inherit a single color via `currentColor`. */
 .divider {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.65rem;
     padding: 0 0.25rem;
     margin-bottom: 0.5rem;
+    color: rgba(231, 221, 199, 0.28);
 }
 
 .divider-line {
     flex: 1;
     height: 1px;
-    background: var(--rule);
+    background: currentColor;
 }
 
 .divider-end {
-    color: var(--brass-dim);
-    font-size: 0.9rem;
+    font-size: 1.15rem;
     line-height: 1;
     flex-shrink: 0;
     /* Raise the glyphs a hair so their optical center aligns with the
