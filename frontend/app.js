@@ -216,7 +216,8 @@ async function dispatch(event, payload = {}) {
     if (currentState === State.LISTEN_PLAYING && prevState !== State.LISTEN_PLAYING) {
         const audioEl = document.querySelector(".played-audio audio");
         if (audioEl) {
-            let pauseTimeout = null;
+            let pauseInterval = null;
+            let pauseRemaining = 15;
             let playbackAnalyser = null;
             let playbackRAF = null;
 
@@ -268,34 +269,53 @@ async function dispatch(event, payload = {}) {
 
             audioEl.addEventListener("pause", () => {
                 if (audioEl.ended) return;
+                pauseRemaining = 15;
                 const btn = document.querySelector(".played-audio .play-btn");
-                if (btn) btn.classList.add("is-paused-countdown");
-                pauseTimeout = setTimeout(() => {
-                    pauseTimeout = null;
-                    dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
-                }, 15000);
+                const icon = btn?.querySelector(".play-icon");
+                pauseInterval = setInterval(() => {
+                    pauseRemaining -= 0.1;
+                    if (btn) {
+                        // Opacity: 1 → 0 over 15s
+                        btn.style.opacity = String(Math.max(0, pauseRemaining / 15));
+                        // Border: brass → crimson at ≤10s
+                        btn.style.borderColor = pauseRemaining <= 10 ? "var(--crimson)" : "";
+                    }
+                    if (icon) {
+                        if (pauseRemaining <= 5) {
+                            // Final 5s: show countdown number
+                            icon.style.cssText = "font-size:1.2rem;transform:none;color:var(--crimson)";
+                            icon.textContent = String(Math.ceil(pauseRemaining));
+                        } else if (pauseRemaining <= 10) {
+                            icon.style.cssText = "font-size:0.65rem;transform:none;white-space:nowrap;color:var(--crimson)";
+                            icon.textContent = "you're losing it";
+                        }
+                    }
+                    if (pauseRemaining <= 0) {
+                        clearInterval(pauseInterval);
+                        pauseInterval = null;
+                        dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
+                    }
+                }, 100);
             });
 
             audioEl.addEventListener("play", () => {
+                clearInterval(pauseInterval);
+                pauseInterval = null;
                 const btn = document.querySelector(".played-audio .play-btn");
                 if (btn) {
-                    btn.classList.remove("is-paused-countdown");
-                    // Reset animation so it starts fresh on next pause
-                    btn.style.animation = "none";
-                    btn.offsetHeight; // force reflow
-                    btn.style.animation = "";
-                }
-                if (pauseTimeout) {
-                    clearTimeout(pauseTimeout);
-                    pauseTimeout = null;
+                    btn.style.opacity = "";
+                    btn.style.borderColor = "";
+                    const icon = btn.querySelector(".play-icon");
+                    if (icon) {
+                        icon.style.cssText = "";
+                        icon.textContent = "⏸";
+                    }
                 }
             });
 
             audioEl.addEventListener("ended", () => {
-                if (pauseTimeout) {
-                    clearTimeout(pauseTimeout);
-                    pauseTimeout = null;
-                }
+                clearInterval(pauseInterval);
+                pauseInterval = null;
                 stopPlaybackGlow();
                 dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
             }, { once: true });

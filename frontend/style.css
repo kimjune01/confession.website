@@ -519,17 +519,6 @@ input {
     transform: none;
 }
 
-/* 15 s pause timeout: button fades away to signal "resume or lose it."
- * No words — the dying button IS the countdown. */
-.play-btn.is-paused-countdown {
-    animation: pause-deplete 15s linear forwards;
-}
-
-@keyframes pause-deplete {
-    0% { border-color: var(--brass-dim); opacity: 1; }
-    75% { border-color: var(--brass-dim); opacity: 0.6; }
-    100% { border-color: transparent; opacity: 0.15; }
-}
 
 .message-text {
     color: var(--parchment);
