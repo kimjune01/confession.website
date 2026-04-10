@@ -30,36 +30,48 @@ const effectHandlers = {
             const replyCodeExp = result.data?.reply_code_exp
                 ? result.data.reply_code_exp * 1000
                 : null;
-            return { event: "PROBE_OK", payload: { slug, replyCodeExp } };
+            const hasAudio = Boolean(result.data?.has_audio);
+            return { event: "PROBE_OK", payload: { slug, replyCodeExp, hasAudio } };
         }
         return { event: "PROBE_404", payload: { slug } };
     },
-    "fetch-listen": async (payload) => {
+    // Phase 1: read-only peek returns audio without burning.
+    "fetch-peek": async (payload) => {
         const slug = payload.slug || payload.currentData?.slug || "";
-        const autoplay = Boolean(payload.autoplay || payload.currentData?.autoplay);
-        const result = await api.listen(slug);
+        const result = await api.peek(slug);
         if (!result.ok) {
             return { event: "LISTEN_404", payload: { slug } };
         }
-        const data = result.data;
-        const base = {
-            slug,
-            content: { ...buildContent(data), autoplay },
+        return {
+            event: "PEEK_OK",
+            payload: { slug, content: buildContent(result.data) },
         };
+    },
+    // Phase 2: burn commits the listen and returns the reply code.
+    // Called after playback starts on LISTEN_PLAYING.
+    "fetch-burn": async (payload) => {
+        const slug = payload.slug || payload.currentData?.slug || "";
+        const result = await api.listen(slug);
+        if (!result.ok) {
+            // Slug already burned (race) or gone — non-fatal.
+            return { event: "BURN_FAILED", payload: { slug } };
+        }
+        const data = result.data;
         if (data.terminated) {
-            return { event: "LISTEN_200_TERMINAL", payload: base };
+            return { event: "BURN_OK", payload: { slug, terminated: true } };
         }
         if (data.reply_code) {
             return {
-                event: "LISTEN_200_RALLY",
+                event: "BURN_OK",
                 payload: {
-                    ...base,
+                    slug,
                     replyCode: data.reply_code,
                     replyCodeExp: data.reply_code_exp ? data.reply_code_exp * 1000 : null,
                 },
             };
         }
-        return { event: "LISTEN_200_BURN_LOSER", payload: base };
+        // Burn race loser — someone else listened first
+        return { event: "BURN_OK", payload: { slug, burnLoser: true } };
     },
     "fetch-first-compose": async (payload) => {
         // Optimistic UI: the audio lives in _draft (stashed from
@@ -104,12 +116,12 @@ const effectHandlers = {
     "fetch-rally-end": async (payload) => {
         // Text-as-terminator: send a non-empty text field with no audio.
         // Per SPEC, text-only compose on a rally turn terminates the
-        // channel. The literal content is never seen — the sender just
-        // observes the channel collapse — so a single-character marker
-        // is enough and stays below the 280-char cap.
+        // channel. The text content is visible to the other side via
+        // the "show text" button on their listen screen.
+        const text = payload.currentData?.endText || "·";
         const result = await api.rallyCompose(payload.currentData.slug, {
             reply_code: payload.currentData.replyCode,
-            text: "·",
+            text,
             audio: undefined,
         });
         if (result.ok) {

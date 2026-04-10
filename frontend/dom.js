@@ -32,27 +32,26 @@ function formatRemaining(remainingMs) {
 function appendCompose(target, props) {
     const compose = cloneTemplate("tpl-compose");
     const status = compose.querySelector(".compose-status");
-    const countdown = compose.querySelector(".countdown-card");
-    const phase = compose.querySelector(".countdown-phase");
-    const time = compose.querySelector(".countdown-time");
-    const recordStack = compose.querySelector(".record-stack");
-    const recordBtn = compose.querySelector(".record-btn");
-    const recordTime = compose.querySelector(".record-time");
-    const recordCaption = compose.querySelector(".record-caption");
-    const audioPreview = compose.querySelector(".audio-preview");
+    const tabs = compose.querySelector(".compose-tabs");
+    const audioPanel = compose.querySelector(".tab-panel-audio");
+    const textPanel = compose.querySelector(".tab-panel-text");
+    const countdown = audioPanel.querySelector(".countdown-card");
+    const phase = audioPanel.querySelector(".countdown-phase");
+    const time = audioPanel.querySelector(".countdown-time");
+    const recordStack = audioPanel.querySelector(".record-stack");
+    const recordBtn = audioPanel.querySelector(".record-btn");
+    const recordTime = audioPanel.querySelector(".record-time");
+    const recordCaption = audioPanel.querySelector(".record-caption");
+    const audioPreview = audioPanel.querySelector(".audio-preview");
     const previewAudio = audioPreview.querySelector("audio");
-    const composeActions = compose.querySelector(".compose-actions");
-    const sendBtn = compose.querySelector(".send-btn");
-    const rallyEnd = compose.querySelector(".rally-end");
-    const endBtn = rallyEnd.querySelector('[data-action="end-rally"]');
+    const audioActions = audioPanel.querySelector(".compose-actions");
+    const sendBtn = audioActions.querySelector(".send-btn");
 
     const hasAudio = Boolean(props.audio?.url);
     const canEnd = Boolean(props.canEnd);
 
     sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : copy.SEND_AUDIO_LABEL;
     sendBtn.disabled = props.sending || !hasAudio;
-    endBtn.textContent = copy.END_HERE_LABEL;
-    endBtn.disabled = Boolean(props.sending);
 
     if (props.status) {
         status.hidden = false;
@@ -71,20 +70,20 @@ function appendCompose(target, props) {
         }
     }
 
+    // Show tabs on rally states so the user can switch between
+    // recording audio (keeps the rally) and typing text (terminates).
+    if (canEnd) {
+        tabs.hidden = false;
+    }
+
     // Step reveal: record stack is the initial control; once audio is
-    // captured, it gives way to the preview + send actions. On rally
-    // states, "end here" sits alongside the record button as a
-    // terminator alternative — hidden mid-record and after audio is
-    // captured, since both commit the user to an audio-bearing send.
+    // captured, it gives way to the preview + send actions.
     recordStack.hidden = hasAudio;
     audioPreview.hidden = !hasAudio;
-    composeActions.hidden = !hasAudio;
-    rallyEnd.hidden = !canEnd || hasAudio || Boolean(props.recording);
+    audioActions.hidden = !hasAudio;
 
     recordBtn.classList.toggle("is-recording", Boolean(props.recording));
     recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
-    // Keep .record-time in the layout flow with visibility (not [hidden])
-    // so starting a recording doesn't push sibling content down.
     recordTime.textContent = formatSeconds(props.recordSeconds || 0);
     recordTime.style.visibility = props.recording ? "visible" : "hidden";
     recordCaption.textContent = props.recordCaption || "";
@@ -94,10 +93,7 @@ function appendCompose(target, props) {
         previewAudio.src = props.audio.url;
     }
 
-    // Custom play button — native <audio> is hidden, we toggle its
-    // play/pause on the dedicated button and mirror the state into
-    // the glyph via these listeners.
-    const playBtn = compose.querySelector(".play-btn");
+    const playBtn = audioPanel.querySelector(".play-btn");
     const playIcon = playBtn.querySelector(".play-icon");
     previewAudio.addEventListener("play", () => {
         playBtn.classList.add("is-playing");
@@ -233,6 +229,13 @@ export function render_probe_loading() {
     return frame;
 }
 
+export function render_listen_playing(props = {}) {
+    const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
+    const body = frame.querySelector(".surface-body");
+    appendContent(body, { ...props.content, autoplay: true });
+    return frame;
+}
+
 export function render_probe_404() {
     const frame = brandFrame(copy.NOTHING_HERE, "");
     frame.classList.add("is-empty");
@@ -243,17 +246,14 @@ export function render_probe_404() {
 export function render_listen_ready(props = {}) {
     const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
     const card = cloneTemplate("tpl-listen-ready");
-    frame.querySelector(".surface-body").append(card);
-    return frame;
-}
-
-export function render_listen_loading() {
-    // Same continuity trick as render_probe_loading — hold the listen
-    // surface with a disabled button while the fetch resolves.
-    const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
-    const card = cloneTemplate("tpl-listen-ready");
-    const btn = card.querySelector('[data-action="listen"]');
-    if (btn) btn.disabled = true;
+    const listenBtn = card.querySelector('[data-action="listen"]');
+    const textBtn = card.querySelector('[data-action="show-text"]');
+    if (props.hasAudio === false) {
+        // Text-only content (e.g. end-here terminator). No audio
+        // drama — just a button to reveal the text.
+        listenBtn.hidden = true;
+        textBtn.hidden = false;
+    }
     frame.querySelector(".surface-body").append(card);
     return frame;
 }
@@ -265,14 +265,8 @@ export function render_post_listen_rally(props = {}) {
     // player — the user already heard (or saved) the message before
     // arriving here. The audio element stays in the DOM at 0×0 so
     // autoplay still fires on browsers that honour it.
-    // Append the content card for autoplay wiring but hide it entirely
-    // — the audio element stays in the DOM at 0×0 so autoplay fires,
-    // but neither the player nor its divider are visible.
-    appendContent(body, props.content);
-    const contentCard = body.querySelector(".content-card");
-    if (contentCard) {
-        contentCard.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;opacity:0";
-    }
+    // No playback on the reply screen — the user already heard the
+    // message on LISTEN_PLAYING. Just the compose UI.
     appendCompose(body, {
         ...props,
         canEnd: true,
@@ -342,7 +336,7 @@ export function swapSurface(name, props = {}) {
         PROBE_LOADING: render_probe_loading,
         PROBE_404: render_probe_404,
         LISTEN_READY: render_listen_ready,
-        LISTEN_LOADING: render_listen_loading,
+        LISTEN_PLAYING: render_listen_playing,
         POST_LISTEN_RALLY: render_post_listen_rally,
         POST_LISTEN_RALLY_REFRESH: render_post_listen_rally_refresh,
         POST_LISTEN_TERMINAL: render_post_listen_terminal,
@@ -363,18 +357,19 @@ export function syncComposer(props = {}) {
         return;
     }
 
+    const audioPanel = compose.querySelector(".tab-panel-audio");
     const status = compose.querySelector(".compose-status");
-    const countdown = compose.querySelector(".countdown-card");
-    const phase = compose.querySelector(".countdown-phase");
-    const time = compose.querySelector(".countdown-time");
-    const recordStack = compose.querySelector(".record-stack");
-    const recordBtn = compose.querySelector(".record-btn");
-    const recordTime = compose.querySelector(".record-time");
-    const recordCaption = compose.querySelector(".record-caption");
-    const audioPreview = compose.querySelector(".audio-preview");
+    const countdown = audioPanel?.querySelector(".countdown-card");
+    const phase = audioPanel?.querySelector(".countdown-phase");
+    const time = audioPanel?.querySelector(".countdown-time");
+    const recordStack = audioPanel?.querySelector(".record-stack");
+    const recordBtn = audioPanel?.querySelector(".record-btn");
+    const recordTime = audioPanel?.querySelector(".record-time");
+    const recordCaption = audioPanel?.querySelector(".record-caption");
+    const audioPreview = audioPanel?.querySelector(".audio-preview");
     const previewAudio = audioPreview?.querySelector("audio");
-    const composeActions = compose.querySelector(".compose-actions");
-    const sendBtn = compose.querySelector(".send-btn");
+    const audioActions = audioPanel?.querySelector(".compose-actions");
+    const sendBtn = audioActions?.querySelector(".send-btn");
 
     const hasAudio = Boolean(props.audio?.url);
 
@@ -410,16 +405,6 @@ export function syncComposer(props = {}) {
         recordCaption.hidden = !props.recordCaption;
     }
 
-    const rallyEnd = compose.querySelector(".rally-end");
-    if (rallyEnd) {
-        const canEnd = Boolean(props.canEnd);
-        rallyEnd.hidden = !canEnd || Boolean(props.audio?.url) || Boolean(props.recording);
-        const endBtn = rallyEnd.querySelector('[data-action="end-rally"]');
-        if (endBtn) {
-            endBtn.disabled = Boolean(props.sending);
-        }
-    }
-
     if (previewAudio && audioPreview) {
         if (hasAudio) {
             audioPreview.hidden = false;
@@ -433,8 +418,8 @@ export function syncComposer(props = {}) {
         }
     }
 
-    if (composeActions) {
-        composeActions.hidden = !hasAudio;
+    if (audioActions) {
+        audioActions.hidden = !hasAudio;
     }
 
     if (sendBtn) {

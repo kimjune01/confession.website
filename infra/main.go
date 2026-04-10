@@ -202,6 +202,10 @@ func main() {
 		if err != nil {
 			return err
 		}
+		peekFn, err := newFn("peek", 10)
+		if err != nil {
+			return err
+		}
 		listenFn, err := newFn("listen", 10)
 		if err != nil {
 			return err
@@ -357,6 +361,7 @@ func main() {
 		}{
 			{"compose", "POST", "/api/compose", composeFn},
 			{"probe", "GET", "/api/slug/{slug}", probeFn},
+			{"peek", "GET", "/api/slug/{slug}/peek", peekFn},
 			{"listen", "POST", "/api/slug/{slug}/listen", listenFn},
 			{"rally-compose", "POST", "/api/slug/{slug}/compose", rallyFn},
 			{"subscribe", "POST", "/api/slug/{slug}/subscribe", subscribeFn},

@@ -422,6 +422,15 @@ input {
     gap: 0.85rem;
 }
 
+.audio-preview .play-btn {
+    width: 44px;
+    height: 44px;
+}
+
+.audio-preview .play-icon {
+    font-size: 0.95rem;
+}
+
 .audio-preview audio {
     display: none;
 }
@@ -437,9 +446,15 @@ input {
     display: none;
 }
 
+/* On the listen-playing screen the play button is the sole control —
+ * center it like the record button. */
+.content-card .played-audio {
+    padding: 1rem 0;
+}
+
 .play-btn {
-    width: 44px;
-    height: 44px;
+    width: 86px;
+    height: 86px;
     border-radius: 50%;
     border: 1px solid var(--brass-dim);
     background: transparent;
@@ -460,7 +475,7 @@ input {
 
 .play-btn .play-icon {
     display: inline-block;
-    font-size: 0.95rem;
+    font-size: 1.6rem;
     /* Nudge the triangle so it feels optically centered — the glyph
      * has more weight on its left edge, so shift right by 1px. */
     transform: translateX(1px);
@@ -585,23 +600,75 @@ input {
 }
 
 .link-actions .send-btn {
-    min-width: 8rem;
+    width: 70%;
 }
 
-/* "end here" is the text-terminator alternative to recording a reply.
- * It lives inline with the record button (.record-row), de-emphasized
- * so it reads as the quiet second option, not a primary action. */
-.rally-end .ghost-btn {
+/* Tab bar for record / text toggle on rally reply screens. */
+.compose-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 2.5rem;
+}
+
+.tab-btn {
+    background: none;
     border: none;
-    padding: 0.5rem 1rem;
+    border-bottom: 2px solid transparent;
     color: var(--muted);
-    font-size: 0.9rem;
-    white-space: nowrap;
+    font-family: inherit;
+    font-size: 0.95rem;
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.08em;
+    padding: 0.35rem 0.1rem;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
 }
 
-.rally-end .ghost-btn:hover:not(:disabled) {
+.tab-btn.tab-active {
+    color: var(--parchment);
+    border-bottom-color: var(--brass);
+}
+
+.tab-btn:hover:not(.tab-active) {
     color: var(--parchment-dim);
-    background: transparent;
+}
+
+/* Text panel — textarea for the terminator message. */
+.tab-panel-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.compose-text {
+    width: 100%;
+    background: var(--ink-0);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 0.9rem 1rem;
+    color: var(--parchment);
+    font-family: inherit;
+    font-size: 1.05rem;
+    line-height: 1.55;
+    min-height: 100px;
+    resize: vertical;
+}
+
+.compose-text::placeholder {
+    color: var(--muted);
+    font-style: italic;
+}
+
+.compose-text:focus {
+    outline: none;
+    border-color: var(--brass-dim);
+}
+
+/* Audio panel uses the existing record-stack / audio-preview styling. */
+.tab-panel-audio {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
 }
 
 .compose-actions .send-btn,

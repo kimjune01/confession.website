@@ -25,31 +25,40 @@
         <section class="compose-card">
             <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <div class="compose-status" hidden></div>
-            <div class="countdown-card" hidden>
-                <p class="countdown-phase"></p>
-                <p class="countdown-time"></p>
+            <div class="compose-tabs" hidden>
+                <button type="button" class="tab-btn tab-active" data-tab="audio">record</button>
+                <button type="button" class="tab-btn" data-tab="text">text</button>
             </div>
-            <div class="record-stack">
-                <div class="record-row">
-                    <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
-                        <span class="record-icon"></span>
-                    </button>
-                    <div class="rally-end" hidden>
-                        <button type="button" class="ghost-btn" data-action="end-rally">end here</button>
+            <div class="tab-panel-audio">
+                <div class="record-stack">
+                    <div class="record-row">
+                        <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
+                            <span class="record-icon"></span>
+                        </button>
                     </div>
+                    <p class="record-time">0:00</p>
+                    <p class="record-caption"></p>
                 </div>
-                <p class="record-time">0:00</p>
-                <p class="record-caption"></p>
+                <div class="countdown-card" hidden>
+                    <p class="countdown-phase"></p>
+                    <p class="countdown-time"></p>
+                </div>
+                <div class="audio-preview" hidden>
+                    <audio preload="metadata"></audio>
+                    <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play recording">
+                        <span class="play-icon">▶</span>
+                    </button>
+                    <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
+                </div>
+                <div class="compose-actions" hidden>
+                    <button type="button" class="send-btn" data-action="send"></button>
+                </div>
             </div>
-            <div class="audio-preview" hidden>
-                <audio preload="metadata"></audio>
-                <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play recording">
-                    <span class="play-icon">▶</span>
-                </button>
-                <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
-            </div>
-            <div class="compose-actions" hidden>
-                <button type="button" class="send-btn" data-action="send"></button>
+            <div class="tab-panel-text" hidden>
+                <textarea class="compose-text" rows="4" maxlength="280" placeholder="this closes the channel"></textarea>
+                <div class="compose-actions">
+                    <button type="button" class="send-btn" data-action="send-text">send</button>
+                </div>
             </div>
         </section>
     </template>
@@ -58,6 +67,7 @@
         <section class="notice-card">
             <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <button type="button" class="send-btn listen-btn" data-action="listen">listen just once</button>
+            <button type="button" class="send-btn" data-action="show-text" hidden>show text</button>
         </section>
     </template>
 
@@ -81,7 +91,7 @@
                 <button type="button" class="send-btn compact" data-action="copy-link">copy</button>
                 <button type="button" class="ghost-btn compact" data-action="share-link">share</button>
             </div>
-            <p class="inline-note">check the link yourself to see if it's been heard.</p>
+            <p class="inline-note" style="visibility:hidden">check the link yourself to see if it's been heard.</p>
             <div class="push-prompt" hidden>
                 <p class="push-copy"></p>
                 <div class="push-actions">

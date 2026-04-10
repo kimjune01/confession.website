@@ -3,7 +3,7 @@ export const State = {
     PROBE_LOADING: "PROBE_LOADING",
     PROBE_404: "PROBE_404",
     LISTEN_READY: "LISTEN_READY",
-    LISTEN_LOADING: "LISTEN_LOADING",
+    LISTEN_PLAYING: "LISTEN_PLAYING",
     POST_LISTEN_RALLY: "POST_LISTEN_RALLY",
     POST_LISTEN_RALLY_REFRESH: "POST_LISTEN_RALLY_REFRESH",
     POST_LISTEN_TERMINAL: "POST_LISTEN_TERMINAL",
@@ -18,11 +18,11 @@ export const Event = {
     START_REFRESH_RALLY: "START_REFRESH_RALLY",
     PROBE_OK: "PROBE_OK",
     PROBE_404: "PROBE_404",
-    LISTEN_TAP: "LISTEN_TAP",
-    LISTEN_200_RALLY: "LISTEN_200_RALLY",
-    LISTEN_200_BURN_LOSER: "LISTEN_200_BURN_LOSER",
-    LISTEN_200_TERMINAL: "LISTEN_200_TERMINAL",
     LISTEN_404: "LISTEN_404",
+    PEEK_OK: "PEEK_OK",
+    BURN_OK: "BURN_OK",
+    BURN_FAILED: "BURN_FAILED",
+    LISTEN_AUDIO_DONE: "LISTEN_AUDIO_DONE",
     SEND_TAP: "SEND_TAP",
     // Recipient chose to terminate the channel with text (no audio).
     // Sent from POST_LISTEN_RALLY / POST_LISTEN_RALLY_REFRESH only.
@@ -110,7 +110,11 @@ export function transition(current, event, payload = {}) {
             return {
                 next: State.LISTEN_READY,
                 effects: [],
-                data: { slug: payload.slug, replyCodeExp: payload.replyCodeExp || null },
+                data: {
+                    slug: payload.slug,
+                    replyCodeExp: payload.replyCodeExp || null,
+                    hasAudio: Boolean(payload.hasAudio),
+                },
             };
         case Event.PROBE_404:
         case Event.LISTEN_404:
@@ -120,26 +124,88 @@ export function transition(current, event, payload = {}) {
                 effects: ["clear-fragment", "stop-countdown"],
                 data: { slug: payload.slug || payload.currentData?.slug || "" },
             };
-        case Event.LISTEN_TAP:
+        case Event.PEEK_OK:
+            // Peek returned content without burning. If audio is
+            // present, play it; otherwise skip straight to terminal
+            // display (text-only content from an end-here terminator).
             if (current !== State.LISTEN_READY) invalid(current, event);
+            if (payload.content?.audioUrl) {
+                return {
+                    next: State.LISTEN_PLAYING,
+                    effects: ["fetch-burn"],
+                    data: {
+                        slug: payload.slug,
+                        content: { ...payload.content, autoplay: true },
+                    },
+                };
+            }
+            // Text-only — no audio to play. Show terminal screen.
             return {
-                next: State.LISTEN_LOADING,
-                effects: ["fetch-listen"],
+                next: State.POST_LISTEN_TERMINAL,
+                effects: ["clear-fragment", "stop-countdown"],
+                data: { slug: payload.slug, content: payload.content },
+            };
+        case Event.BURN_OK:
+            // Burn completed — store the reply code and write the
+            // fragment NOW (not on PEEK_OK, where it didn't exist yet).
+            if (current !== State.LISTEN_PLAYING) invalid(current, event);
+            if (payload.burnLoser) {
+                // Someone else listened first. Stash the flag — when
+                // audio ends, LISTEN_AUDIO_DONE routes to burn-loser
+                // instead of the reply composer.
+                return {
+                    next: State.LISTEN_PLAYING,
+                    effects: [],
+                    data: { ...payload.currentData, burnLoser: true },
+                };
+            }
+            return {
+                next: State.LISTEN_PLAYING,
+                effects: ["write-fragment"],
                 data: {
-                    slug: payload.slug || payload.currentData?.slug || "",
-                    autoplay: Boolean(payload.autoplay),
+                    ...payload.currentData,
+                    replyCode: payload.replyCode || null,
+                    replyCodeExp: payload.replyCodeExp || null,
+                    terminated: Boolean(payload.terminated),
                 },
             };
-        case Event.LISTEN_200_RALLY:
-            if (current !== State.LISTEN_LOADING) invalid(current, event);
+        case Event.BURN_FAILED:
+            if (current !== State.LISTEN_PLAYING) invalid(current, event);
+            return {
+                next: State.LISTEN_PLAYING,
+                effects: [],
+                data: { ...payload.currentData, burnFailed: true },
+            };
+        case Event.LISTEN_AUDIO_DONE:
+            if (current !== State.LISTEN_PLAYING) invalid(current, event);
+            // Burn loser: someone else listened first — no reply slot.
+            if (payload.currentData?.burnLoser) {
+                return {
+                    next: State.POST_LISTEN_BURN_LOSER,
+                    effects: ["clear-fragment", "stop-countdown"],
+                    data: {
+                        slug: payload.currentData?.slug || "",
+                        content: payload.currentData?.content,
+                    },
+                };
+            }
+            // Burn failed or no reply code — show 404.
+            if (payload.currentData?.burnFailed || !payload.currentData?.replyCode) {
+                return {
+                    next: State.PROBE_404,
+                    effects: ["clear-fragment", "stop-countdown"],
+                    data: { slug: payload.currentData?.slug || "" },
+                };
+            }
+            // Normal path: burn succeeded, reply code available.
             return {
                 next: State.POST_LISTEN_RALLY,
-                effects: ["write-fragment", "start-countdown"],
+                effects: ["start-countdown"],
                 data: {
-                    slug: payload.slug,
-                    content: payload.content,
-                    replyCode: payload.replyCode,
-                    replyCodeExp: payload.replyCodeExp,
+                    slug: payload.currentData?.slug || "",
+                    content: payload.currentData?.content,
+                    replyCode: payload.currentData?.replyCode,
+                    replyCodeExp: payload.currentData?.replyCodeExp,
                     phase: "calm",
                     remainingMs: null,
                     audio: null,
@@ -149,20 +215,6 @@ export function transition(current, event, payload = {}) {
                     recording: false,
                     recordSeconds: 0,
                 },
-            };
-        case Event.LISTEN_200_TERMINAL:
-            if (current !== State.LISTEN_LOADING) invalid(current, event);
-            return {
-                next: State.POST_LISTEN_TERMINAL,
-                effects: ["clear-fragment", "stop-countdown"],
-                data: { slug: payload.slug, content: payload.content },
-            };
-        case Event.LISTEN_200_BURN_LOSER:
-            if (current !== State.LISTEN_LOADING) invalid(current, event);
-            return {
-                next: State.POST_LISTEN_BURN_LOSER,
-                effects: ["clear-fragment", "stop-countdown"],
-                data: { slug: payload.slug, content: payload.content },
             };
         case Event.SEND_TAP:
             if (current === State.LANDING) {

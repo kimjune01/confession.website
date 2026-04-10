@@ -1,4 +1,5 @@
 import { Event, State, initialState, transition } from "/state.js";
+import * as api from "/api.js";
 import * as effects from "/effects.js";
 import * as dom from "/dom.js";
 import { canRecord, recordingState, startRecording, stopRecording, NoMicError, PermissionDeniedError } from "/audio.js";
@@ -21,6 +22,7 @@ function stopListenCountdown() {
     if (currentData) {
         currentData.countdown = null;
     }
+    prefetchPromise = null; // discard on cancel
     const btn = document.querySelector(".listen-btn");
     if (btn) {
         btn.classList.remove("is-counting");
@@ -28,11 +30,21 @@ function stopListenCountdown() {
     }
 }
 
+let prefetchPromise = null;
+
 function startListenCountdown() {
     stopListenCountdown();
     currentData.countdown = { count: 3 };
-    // Toggle button visuals directly — no full rerender needed since
-    // we're just flipping a class and text on the same element.
+
+    // Peek: read-only fetch of audio data. No burn — the message
+    // survives if the user cancels during the countdown. The burn
+    // fires later (fetch-burn effect on LISTEN_PLAYING entry).
+    const slug = window.location.pathname.replace(/^\/+/, "");
+    prefetchPromise = effects.run("fetch-peek", {
+        slug,
+        currentData,
+    });
+
     const btn = document.querySelector(".listen-btn");
     if (btn) {
         btn.classList.add("is-counting");
@@ -45,8 +57,39 @@ function startListenCountdown() {
         }
         currentData.countdown.count -= 1;
         if (currentData.countdown.count <= 0) {
-            stopListenCountdown();
-            dispatch(Event.LISTEN_TAP, { autoplay: true });
+            const pending = prefetchPromise;
+            // Kill the interval but DON'T restore the button visual
+            // yet — keep it in counting state until the dispatch fires
+            // so there's no flash back to "listen just once".
+            clearInterval(listenCountdownInterval);
+            listenCountdownInterval = null;
+            prefetchPromise = null;
+            if (currentData) currentData.countdown = null;
+            if (pending) {
+                pending.then(async (result) => {
+                    if (result?.event) {
+                        await dispatch(result.event, result.payload || {});
+                    }
+                }).catch((err) => {
+                    console.error(err);
+                    // On error, restore the button
+                    const btn = document.querySelector(".listen-btn");
+                    if (btn) {
+                        btn.classList.remove("is-counting");
+                        btn.textContent = "listen just once";
+                    }
+                });
+            } else {
+                // Peek should always produce a result before countdown
+                // completes. If prefetchPromise is null here, it means
+                // peek was never started — log an error and restore UI.
+                console.error("startListenCountdown: no prefetch promise at countdown end");
+                const btn = document.querySelector(".listen-btn");
+                if (btn) {
+                    btn.classList.remove("is-counting");
+                    btn.textContent = "listen just once";
+                }
+            }
             return;
         }
     }, 1000);
@@ -136,13 +179,28 @@ async function dispatch(event, payload = {}) {
     currentData = tx.data || {};
     syncRecordCapabilities();
 
-    // Optimistic FIRST_SENT: when the API responds (SEND_OK) and we're
-    // already showing FIRST_SENT, patch the link in-place instead of a
-    // full swapSurface to avoid any flash.
+    // Same-state transitions that shouldn't trigger a full rerender:
+    // FIRST_SENT→FIRST_SENT (SEND_OK patches the link field) and
+    // LISTEN_PLAYING→LISTEN_PLAYING (BURN_OK updates data silently
+    // while audio keeps playing).
     if (prevState === State.FIRST_SENT && currentState === State.FIRST_SENT) {
         dom.patchFirstSent(currentData);
+    } else if (prevState === State.LISTEN_PLAYING && currentState === State.LISTEN_PLAYING) {
+        // BURN_OK — data updated (replyCode populated), no visual change
     } else {
         dom.swapSurface(currentState, currentData);
+    }
+
+    // Audio plays fully on LISTEN_PLAYING before advancing to the
+    // reply screen. No early advance — the user hears the complete
+    // message, then sees "reply?" when it ends.
+    if (currentState === State.LISTEN_PLAYING) {
+        const audioEl = document.querySelector(".played-audio audio");
+        if (audioEl) {
+            audioEl.addEventListener("ended", () => {
+                dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
+            }, { once: true });
+        }
     }
 
     for (const effectName of tx.effects) {
@@ -235,6 +293,25 @@ async function handleRecordToggle() {
 
 function installClickHandlers() {
     document.addEventListener("click", async (event) => {
+        // Tab switching for record/text on the reply screen.
+        const tab = event.target instanceof Element ? event.target.closest("[data-tab]") : null;
+        if (tab) {
+            const tabName = tab.dataset.tab;
+            const compose = tab.closest(".compose-card");
+            if (!compose) return;
+            compose.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("tab-active", b === tab));
+            const audioPanel = compose.querySelector(".tab-panel-audio");
+            const textPanel = compose.querySelector(".tab-panel-text");
+            if (audioPanel) audioPanel.hidden = tabName !== "audio";
+            if (textPanel) textPanel.hidden = tabName !== "text";
+            // Update the rules text based on tab
+            const rules = document.querySelector(".rules");
+            if (rules) {
+                rules.textContent = tabName === "text" ? copy.RALLY_TEXT_RULES : copy.RALLY_RULES;
+            }
+            return;
+        }
+
         const action = event.target instanceof Element ? event.target.closest("[data-action]") : null;
         if (!action) {
             return;
@@ -247,6 +324,37 @@ function installClickHandlers() {
             } else {
                 startListenCountdown();
             }
+            return;
+        }
+        if (name === "show-text") {
+            const slug = window.location.pathname.replace(/^\/+/, "");
+            const result = await api.listen(slug);
+            if (!result.ok) {
+                currentState = State.PROBE_404;
+                currentData = { slug };
+                dom.swapSurface(currentState, currentData);
+                return;
+            }
+            const data = result.data;
+            let audioUrl = null;
+            if (data.audio_b64 && data.audio_mime) {
+                audioUrl = `data:${data.audio_mime};base64,${data.audio_b64}`;
+            }
+            currentState = State.POST_LISTEN_TERMINAL;
+            currentData = { slug, content: { text: data.text || "", audioUrl } };
+            dom.swapSurface(currentState, currentData);
+            return;
+        }
+        if (name === "send-text") {
+            const textarea = document.querySelector(".compose-text");
+            const text = textarea?.value?.trim() || "";
+            if (!text) {
+                currentData.status = "type something first.";
+                syncLiveComposer();
+                return;
+            }
+            currentData.endText = text;
+            await dispatch(Event.END_RALLY_TAP, {});
             return;
         }
         if (name === "send") {
@@ -294,10 +402,18 @@ function installClickHandlers() {
         }
         if (name === "copy-link") {
             await navigator.clipboard.writeText(currentData.url || "");
-            // Swap button text to a checkmark as confirmation instead
-            // of showing a separate "copied." status line.
             action.textContent = "✓";
             action.disabled = true;
+            // Gentle fade in for the "check the link" hint
+            const note = document.querySelector(".link-card .inline-note");
+            if (note) {
+                note.style.transition = "opacity 0.5s ease-out";
+                note.style.opacity = "0";
+                note.style.visibility = "visible";
+                requestAnimationFrame(() => {
+                    note.style.opacity = "1";
+                });
+            }
             // Handing off the link is the explicit user gesture that
             // lets us request push permission. Browsers require a
             // gesture for requestPermission; the copy click counts.

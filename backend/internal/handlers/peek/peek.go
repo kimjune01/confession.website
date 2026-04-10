@@ -1,12 +1,13 @@
-// Package probe implements GET /api/slug/<id> — probe.
-// Returns 200 when the slug has a pending message OR an open reply
-// window (tail burned but reply_code_exp > now). Everything else
-// collapses to 404.
-package probe
+// Package peek implements GET /api/slug/<id>/peek — read-only audio
+// retrieval. Returns the pending message's audio and text without
+// burning. The client uses this to preload audio during the 3 s
+// listen countdown; the actual burn happens via POST /listen after
+// playback starts.
+package peek
 
 import (
 	"context"
-	"time"
+	"encoding/base64"
 
 	"confession-backend/internal"
 
@@ -15,7 +16,13 @@ import (
 
 var store *internal.Store
 
-// Handler is the Lambda entry point for GET /api/slug/<id>.
+type response struct {
+	Text      *string `json:"text"`
+	AudioMIME *string `json:"audio_mime"`
+	AudioB64  *string `json:"audio_b64"`
+}
+
+// Handler is the Lambda entry point for GET /api/slug/<id>/peek.
 func Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
 	if store == nil {
 		var err error
@@ -35,30 +42,28 @@ func Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 	if err != nil {
 		return internal.NotFound(), nil
 	}
-
-	resp := map[string]any{}
-	if meta.ReplyCodeExp > 0 {
-		resp["reply_code_exp"] = meta.ReplyCodeExp
-	}
-
-	// Case 1: tail burned or terminal — the message has been consumed.
-	// Still return 200 if the reply window is open so a refreshed
-	// recipient can see the countdown and reply.
 	if meta.TailBurned || meta.Terminal {
-		if meta.ReplyCodeExp > 0 && meta.ReplyCodeExp > time.Now().Unix() {
-			resp["replyable"] = true
-			return internal.JSON(200, resp), nil
-		}
 		return internal.NotFound(), nil
 	}
-
-	// Case 2: pending message (not burned, not terminal).
 	if meta.TailAudioS3Key == "" && meta.TailText == "" {
 		return internal.NotFound(), nil
 	}
 
+	resp := response{}
+
+	if meta.TailText != "" {
+		t := meta.TailText
+		resp.Text = &t
+	}
 	if meta.TailAudioS3Key != "" {
-		resp["has_audio"] = true
+		audioBytes, audioMIME, err := store.GetAudio(ctx, meta.TailAudioS3Key)
+		if err != nil {
+			return internal.NotFound(), nil
+		}
+		m := audioMIME
+		resp.AudioMIME = &m
+		b := base64.StdEncoding.EncodeToString(audioBytes)
+		resp.AudioB64 = &b
 	}
 
 	return internal.JSON(200, resp), nil

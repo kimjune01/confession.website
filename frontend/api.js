@@ -54,6 +54,10 @@ export async function probe(slug) {
     return request(`/api/slug/${encodeURIComponent(slug)}`);
 }
 
+export async function peek(slug) {
+    return request(`/api/slug/${encodeURIComponent(slug)}/peek`);
+}
+
 export async function listen(slug) {
     return request(`/api/slug/${encodeURIComponent(slug)}/listen`, {
         method: "POST",

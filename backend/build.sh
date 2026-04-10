@@ -14,7 +14,7 @@ cp ../frontend/fonts/*.woff2 cmd/site/static/fonts/
 cp "../frontend/fonts/Charter license.txt" cmd/site/static/fonts/
 cp "../frontend/fonts/IBM Plex OFL.txt" cmd/site/static/fonts/
 
-for cmd in compose probe listen rally_compose subscribe site; do
+for cmd in compose probe peek listen rally_compose subscribe site; do
     echo "Building $cmd..."
     GOOS=linux GOARCH=arm64 go build -o "dist/$cmd/bootstrap" "./cmd/$cmd"
     (cd "dist/$cmd" && zip -q "../$cmd.zip" bootstrap)
