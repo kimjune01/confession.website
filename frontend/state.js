@@ -41,6 +41,10 @@ export const Event = {
     SEND_UNKNOWN: "SEND_UNKNOWN",
     COUNTDOWN_EXPIRED: "COUNTDOWN_EXPIRED",
     DISMISS: "DISMISS",
+    // PUSH_PROMPT_READY is no longer emitted — inspect-push returns
+    // silent on the prompt case and the browser dialog is triggered
+    // explicitly on copy-link. Kept as a key so old references don't
+    // throw on lookup, but the event never fires.
     PUSH_PROMPT_READY: "PUSH_PROMPT_READY",
     PUSH_RESOLVED: "PUSH_RESOLVED",
 };
@@ -90,8 +94,8 @@ export function transition(current, event, payload = {}) {
                 data: {
                     slug: payload.slug,
                     replyCode: payload.replyCode,
-                    replyCodeExp: null,
-                    phase: "refresh-degraded",
+                    replyCodeExp: payload.replyCodeExp || null,
+                    phase: payload.replyCodeExp ? "calm" : "refresh-degraded",
                     remainingMs: null,
                     audio: null,
                     sending: false,
@@ -103,7 +107,11 @@ export function transition(current, event, payload = {}) {
             };
         case Event.PROBE_OK:
             if (current !== State.PROBE_LOADING) invalid(current, event);
-            return { next: State.LISTEN_READY, effects: [], data: { slug: payload.slug } };
+            return {
+                next: State.LISTEN_READY,
+                effects: [],
+                data: { slug: payload.slug, replyCodeExp: payload.replyCodeExp || null },
+            };
         case Event.PROBE_404:
         case Event.LISTEN_404:
         case Event.COUNTDOWN_EXPIRED:
@@ -158,16 +166,29 @@ export function transition(current, event, payload = {}) {
             };
         case Event.SEND_TAP:
             if (current === State.LANDING) {
+                // Optimistic: transition to FIRST_SENT immediately so the
+                // user sees the next screen while the API call is in flight.
+                // Draft is stashed in _draft for rollback on failure.
                 return {
-                    next: State.LANDING,
+                    next: State.FIRST_SENT,
                     effects: ["fetch-first-compose"],
-                    data: withDraft(payload, { sending: true, status: payload.currentData?.status || "" }),
+                    data: {
+                        slug: "",
+                        url: "",
+                        replyable: false,
+                        pushState: "",
+                        pushReason: "",
+                        _draft: { ...payload.currentData },
+                    },
                 };
             }
             if (current === State.POST_LISTEN_RALLY || current === State.POST_LISTEN_RALLY_REFRESH) {
+                // Stop the countdown while the send is in flight so
+                // COUNTDOWN_EXPIRED can't race ahead and flip state to
+                // PROBE_404 while we're waiting for the API response.
                 return {
                     next: current,
-                    effects: ["fetch-rally-compose"],
+                    effects: ["stop-countdown", "fetch-rally-compose"],
                     data: withDraft(payload, { sending: true, status: payload.currentData?.status || "" }),
                 };
             }
@@ -177,14 +198,17 @@ export function transition(current, event, payload = {}) {
             if (current === State.POST_LISTEN_RALLY || current === State.POST_LISTEN_RALLY_REFRESH) {
                 return {
                     next: current,
-                    effects: ["fetch-rally-end"],
+                    effects: ["stop-countdown", "fetch-rally-end"],
                     data: withDraft(payload, { sending: true, ending: true, status: "" }),
                 };
             }
             invalid(current, event);
             break;
         case Event.SEND_OK:
-            if (current === State.LANDING) {
+            if (current === State.FIRST_SENT) {
+                // Optimistic path: we're already on FIRST_SENT from the
+                // SEND_TAP transition. Now the API responded — fill in
+                // the real URL and kick off push inspection.
                 return {
                     next: State.FIRST_SENT,
                     effects: ["inspect-push"],
@@ -213,13 +237,17 @@ export function transition(current, event, payload = {}) {
             invalid(current, event);
             break;
         case Event.SEND_REJECTED:
-            // Content rejection: 400 (text too long, bad audio, bad
-            // reply_code format) or 409 (user-supplied slug collision
-            // on first-turn). Keep the draft alive, clear sending,
-            // surface the error status. Applies on LANDING and on
-            // both rally surfaces.
+            // Optimistic rollback: if we're on FIRST_SENT (optimistic
+            // transition from LANDING), revert to LANDING with the
+            // stashed draft so the user's recording is preserved.
+            if (current === State.FIRST_SENT && payload.currentData?._draft) {
+                return {
+                    next: State.LANDING,
+                    effects: [],
+                    data: { ...payload.currentData._draft, sending: false, status: payload.status || "" },
+                };
+            }
             if (
-                current === State.LANDING ||
                 current === State.POST_LISTEN_RALLY ||
                 current === State.POST_LISTEN_RALLY_REFRESH
             ) {
@@ -245,12 +273,15 @@ export function transition(current, event, payload = {}) {
             break;
         case Event.SEND_UNKNOWN:
             // Transport-level failure with unknown commit outcome.
-            // SPEC is explicit: the server MAY have committed, the
-            // client just can't tell. Preserve the draft and the
-            // surface so the user sees the failure in context — do
-            // NOT clear the fragment or drop to PROBE_404.
+            // Optimistic rollback if on FIRST_SENT.
+            if (current === State.FIRST_SENT && payload.currentData?._draft) {
+                return {
+                    next: State.LANDING,
+                    effects: [],
+                    data: { ...payload.currentData._draft, sending: false, status: payload.status || "" },
+                };
+            }
             if (
-                current === State.LANDING ||
                 current === State.POST_LISTEN_RALLY ||
                 current === State.POST_LISTEN_RALLY_REFRESH
             ) {
@@ -292,13 +323,6 @@ export function transition(current, event, payload = {}) {
                     next: State.PROBE_404,
                     effects: ["clear-fragment", "stop-countdown"],
                     data: { slug: payload.currentData?.slug || "" },
-                };
-            }
-            if (current === State.FIRST_SENT) {
-                return {
-                    next: State.LANDING,
-                    effects: ["clear-fragment", "stop-countdown"],
-                    data: freshComposeData(),
                 };
             }
             invalid(current, event);

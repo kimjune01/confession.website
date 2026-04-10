@@ -27,7 +27,10 @@ const effectHandlers = {
         const slug = payload.slug || payload.currentData?.slug || "";
         const result = await api.probe(slug);
         if (result.ok) {
-            return { event: "PROBE_OK", payload: { slug } };
+            const replyCodeExp = result.data?.reply_code_exp
+                ? result.data.reply_code_exp * 1000
+                : null;
+            return { event: "PROBE_OK", payload: { slug, replyCodeExp } };
         }
         return { event: "PROBE_404", payload: { slug } };
     },
@@ -59,8 +62,12 @@ const effectHandlers = {
         return { event: "LISTEN_200_BURN_LOSER", payload: base };
     },
     "fetch-first-compose": async (payload) => {
-        const audioPayload = payload.currentData?.audio
-            ? { b64: await audio.toBase64(payload.currentData.audio.blob), mime: payload.currentData.audio.mime }
+        // Optimistic UI: the audio lives in _draft (stashed from
+        // LANDING data) since the FIRST_SENT data frame doesn't
+        // carry it at the top level.
+        const audioData = payload.currentData?.audio || payload.currentData?._draft?.audio;
+        const audioPayload = audioData
+            ? { b64: await audio.toBase64(audioData.blob), mime: audioData.mime }
             : undefined;
         const result = await api.compose({
             text: "",

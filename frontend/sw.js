@@ -7,8 +7,7 @@ async function handlePush(event) {
         if (focused) {
             return;
         }
-        await self.registration.showNotification("a new message on confession.website", {
-            body: "open the most recent subscribed slug",
+        await self.registration.showNotification("they replied", {
             tag: "confession.website",
         });
     })());

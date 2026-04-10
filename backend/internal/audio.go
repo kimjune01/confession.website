@@ -39,13 +39,7 @@ func DecodeAndValidate(b64 string) ([]byte, error) {
 	return raw, nil
 }
 
-// ValidateAudioMIME returns true if m is one of the allowed MIME types.
+// ValidateAudioMIME returns true if m starts with "audio/".
 func ValidateAudioMIME(m string) bool {
-	m = strings.TrimSpace(m)
-	for _, allowed := range AllowedAudioMIMEs {
-		if m == allowed {
-			return true
-		}
-	}
-	return false
+	return strings.HasPrefix(strings.TrimSpace(m), "audio/")
 }

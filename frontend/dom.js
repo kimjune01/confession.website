@@ -17,21 +17,16 @@ function formatSeconds(seconds) {
 }
 
 function formatRemaining(remainingMs) {
-    // Refresh-degraded (null) — the rules line already says "hurry",
-    // so leave the countdown surface empty rather than duplicating.
-    if (remainingMs == null) return "";
+    // Refresh-degraded: no expiry timestamp available (page was
+    // refreshed mid-window). Show a nudge instead of a timer.
+    if (remainingMs == null) return "reply window open";
     if (remainingMs <= 0) return "";
-    // Minute resolution (ceil) until the final minute; then seconds.
-    // "5 minutes left" holds from 5:00 down to 4:00 exclusive, "4" from
-    // 4:00 down to 3:00, etc. The user-facing window opens at 5 minutes;
-    // the 2-minute server grace is internal, so clamp the displayed
-    // minutes at 5 so the timer never appears to count 7 → 6 → 5.
     if (remainingMs >= 60000) {
         const minutes = Math.min(5, Math.ceil(remainingMs / 60000));
-        return `${minutes} minute${minutes === 1 ? "" : "s"} left`;
+        return `${minutes} minute${minutes === 1 ? "" : "s"} left to reply`;
     }
     const seconds = Math.ceil(remainingMs / 1000);
-    return `${seconds} second${seconds === 1 ? "" : "s"} left`;
+    return `${seconds} second${seconds === 1 ? "" : "s"} left to reply`;
 }
 
 function appendCompose(target, props) {
@@ -193,11 +188,37 @@ export function render_first_sent(props = {}) {
     const frame = brandFrame(copy.FIRST_SENT_HEADLINE, copy.FIRST_SENT_RULES);
     const card = cloneTemplate("tpl-link-card");
     const link = card.querySelector(".link-out");
-    link.value = props.url || "";
+    // Optimistic: URL may be empty while the API is still in flight.
+    // Show "sealing..." as placeholder. Copy/share buttons are always
+    // visible (prevents layout shift) but disabled until the URL arrives.
+    if (props.url) {
+        link.value = props.url;
+    } else {
+        link.value = "";
+        link.placeholder = copy.LANDING_STATUS_SENDING;
+    }
+    const actions = card.querySelector(".link-actions");
+    if (actions) {
+        actions.querySelectorAll("button").forEach((b) => { b.disabled = !props.url; });
+    }
     card.querySelector('[data-action="share-link"]').hidden = !navigator.share;
     renderPushPrompt(card, props);
     frame.querySelector(".surface-body").append(card);
     return frame;
+}
+
+// In-place update for FIRST_SENT when the API responds with the real
+// URL. Avoids a full swapSurface so there's no flash.
+export function patchFirstSent(props = {}) {
+    const link = app.querySelector(".link-out");
+    if (link) {
+        link.value = props.url || "";
+        link.placeholder = "";
+    }
+    const actions = app.querySelector(".link-actions");
+    if (actions) {
+        actions.querySelectorAll("button").forEach((b) => { b.disabled = !props.url; });
+    }
 }
 
 export function render_probe_loading() {
@@ -222,21 +243,6 @@ export function render_probe_404() {
 export function render_listen_ready(props = {}) {
     const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
     const card = cloneTemplate("tpl-listen-ready");
-    const listenBtn = card.querySelector('[data-action="listen"]');
-    const saveBtn = card.querySelector('[data-action="save-later"]');
-    // During a countdown, the tapped button displays the remaining
-    // seconds as its label and the other is hidden. Tapping again
-    // cancels (handled in app.js).
-    if (props.countdown) {
-        const { action, count } = props.countdown;
-        if (action === "save") {
-            saveBtn.textContent = String(count);
-            listenBtn.hidden = true;
-        } else {
-            listenBtn.textContent = String(count);
-            saveBtn.hidden = true;
-        }
-    }
     frame.querySelector(".surface-body").append(card);
     return frame;
 }
@@ -255,7 +261,18 @@ export function render_listen_loading() {
 export function render_post_listen_rally(props = {}) {
     const frame = brandFrame(copy.RALLY_HEADER, copy.RALLY_RULES);
     const body = frame.querySelector(".surface-body");
+    // Append the content card for autoplay wiring, but hide the visible
+    // player — the user already heard (or saved) the message before
+    // arriving here. The audio element stays in the DOM at 0×0 so
+    // autoplay still fires on browsers that honour it.
+    // Append the content card for autoplay wiring but hide it entirely
+    // — the audio element stays in the DOM at 0×0 so autoplay fires,
+    // but neither the player nor its divider are visible.
     appendContent(body, props.content);
+    const contentCard = body.querySelector(".content-card");
+    if (contentCard) {
+        contentCard.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;opacity:0";
+    }
     appendCompose(body, {
         ...props,
         canEnd: true,
