@@ -92,7 +92,7 @@ body {
     min-height: 100dvh;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
     overflow-x: hidden;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
     -webkit-font-smoothing: antialiased;
@@ -119,11 +119,20 @@ input {
     align-items: center;
 }
 
+/* Fixed-height app container sized to a typical mobile viewport
+ * (~700px, iPhone 14/15 with browser chrome). Content is laid out
+ * inside this box; the site-shell centers the box in the real
+ * viewport. Height never changes → no vertical re-centering shift. */
 .app {
     width: 100%;
     max-width: 560px;
+    height: 700px;
+    max-height: 100dvh;
     padding: 3.5rem 2rem;
     text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 /* ----- surface frame ---------------------------------------- */
@@ -132,7 +141,7 @@ input {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 3rem;
+    gap: 1.75rem;
     animation: reveal 0.28s ease-out forwards;
     transition: opacity 0.3s ease-out;
 }
@@ -147,6 +156,9 @@ input {
     align-items: center;
     gap: 1.5rem;
     padding-bottom: 0.5rem;
+    /* Reserve headline height so font-swap doesn't shift the divider.
+     * 4.7rem headline × 1 line-height + 0.1em padding + gap. */
+    min-height: 5rem;
 }
 
 .headline {
@@ -236,10 +248,7 @@ input {
 .link-card {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
-    /* Shift the card 8px up from the natural flex-gap position so the
-     * divider sits closer to the headline. */
-    margin-top: -0.5rem;
+    gap: 1.25rem;
 }
 
 /* Stylized horizontal divider: thin line flanked by black-feathered
@@ -252,7 +261,7 @@ input {
     align-items: center;
     gap: 0.65rem;
     padding: 0 0.25rem;
-    margin-bottom: 0.5rem;
+    margin: 0.5rem 0 1.25rem 0;
     color: rgba(231, 221, 199, 0.28);
 }
 
@@ -272,10 +281,6 @@ input {
 
 .divider-end-left {
     transform: translateY(-1px) scaleX(-1);
-}
-
-.compose-card.is-overtime {
-    animation: pulse 1.6s ease-in-out infinite;
 }
 
 /* ----- countdown (subtle timeago line) ---------------------- */
@@ -375,16 +380,29 @@ input {
 }
 
 .record-btn .record-icon {
-    width: 22px;
-    height: 22px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
-    background: var(--crimson);
-    transition: border-radius 0.25s, background 0.25s;
+    background: linear-gradient(180deg, #a03838 0%, #6a2020 100%);
+    box-shadow:
+        inset 1px 1px 0 rgba(255, 180, 180, 0.2),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.3);
+    transition: border-radius 0.25s, background 0.25s, box-shadow 0.25s, opacity 0.25s;
+}
+
+.record-btn:hover:not(:disabled) .record-icon {
+    background: linear-gradient(180deg, #c84848 0%, #8a2828 100%);
+    box-shadow:
+        inset 1px 1px 0 rgba(255, 180, 180, 0.4),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .record-btn.is-recording .record-icon {
-    border-radius: 3px;
-    background: var(--parchment);
+    border-radius: 4px;
+    background: linear-gradient(180deg, #c84848 0%, #8a2828 100%);
+    box-shadow:
+        inset 1px 1px 0 rgba(255, 180, 180, 0.4),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .record-time {
@@ -499,6 +517,18 @@ input {
     transform: none;
 }
 
+/* 15 s pause timeout: button fades away to signal "resume or lose it."
+ * No words — the dying button IS the countdown. */
+.play-btn.is-paused-countdown {
+    animation: pause-deplete 15s linear forwards;
+}
+
+@keyframes pause-deplete {
+    0% { border-color: var(--brass-dim); opacity: 1; }
+    75% { border-color: var(--brass-dim); opacity: 0.6; }
+    100% { border-color: transparent; opacity: 0.15; }
+}
+
 .message-text {
     color: var(--parchment);
     font-size: 1.15rem;
@@ -523,44 +553,44 @@ input {
     cursor: pointer;
     font-family: inherit;
     font-size: 1rem;
-    font-weight: 400;
+    font-weight: 600;
     font-variant-caps: all-small-caps;
     letter-spacing: 0.08em;
     transition: opacity 0.2s, border-color 0.25s, background 0.25s, color 0.25s, box-shadow 0.15s;
 }
 
-/* Embossed CTA: gradient face (lighter top, base bottom) + inset
- * rim highlights + outer drop shadow. Active inverts the gradient
- * and shadows to simulate pressing down into the surface. */
+/* Embossed CTA: beveled edges via inset shadows on the brass face
+ * (bright top-left, dark bottom-right) + embossed text-shadow.
+ * Works on dark backgrounds where outer drop shadows are invisible. */
 .send-btn {
-    background: linear-gradient(180deg, var(--brass-bright) 0%, var(--brass) 100%);
+    background: linear-gradient(180deg, #dcc060 0%, #b09038 100%);
     color: var(--ink-0);
     border: 1px solid var(--brass-dim);
     box-shadow:
-        inset 0 1px 0 rgba(255, 245, 220, 0.3),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.12),
-        0 2px 4px rgba(0, 0, 0, 0.35);
+        inset 1px 1px 0 rgba(255, 245, 220, 0.45),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.25);
+    text-shadow: 0 1px 0 rgba(255, 245, 220, 0.35);
 }
 
 .send-btn:hover:not(:disabled) {
-    background: linear-gradient(180deg, #e2c060 0%, var(--brass-bright) 100%);
+    background: linear-gradient(180deg, #e5c868 0%, #b89840 100%);
     border-color: var(--brass);
     box-shadow:
-        inset 0 1px 0 rgba(255, 245, 220, 0.35),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.12),
-        0 3px 6px rgba(0, 0, 0, 0.4);
+        inset 1px 1px 0 rgba(255, 245, 220, 0.55),
+        inset -1px -1px 0 rgba(0, 0, 0, 0.3);
 }
 
 .send-btn:active:not(:disabled) {
-    background: linear-gradient(180deg, var(--brass) 0%, var(--brass-bright) 100%);
+    background: linear-gradient(180deg, #a88830 0%, #c8a848 100%);
     box-shadow:
-        inset 0 1px 0 rgba(0, 0, 0, 0.1),
-        inset 0 -1px 0 rgba(255, 245, 220, 0.15),
-        0 1px 2px rgba(0, 0, 0, 0.3);
+        inset 1px 1px 0 rgba(0, 0, 0, 0.2),
+        inset -1px -1px 0 rgba(255, 245, 220, 0.15);
+    text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.15);
 }
 
 .send-btn:disabled {
     box-shadow: none;
+    text-shadow: none;
 }
 
 .ghost-btn {
@@ -758,21 +788,13 @@ input {
 
 @keyframes reveal {
     from {
-        opacity: 0.55;
+        opacity: 0.4;
     }
     to {
         opacity: 1;
     }
 }
 
-@keyframes pulse {
-    0%, 100% {
-        box-shadow: 0 0 0 0 rgba(176, 58, 58, 0.25);
-    }
-    50% {
-        box-shadow: 0 0 0 10px rgba(176, 58, 58, 0);
-    }
-}
 
 /* ----- mobile ----------------------------------------------- */
 

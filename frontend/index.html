@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>confession.website</title>
+    <link rel="preload" href="/fonts/charter_italic.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/IBMPlexSans-Regular-Latin1.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -17,13 +19,13 @@
                 <h1 class="headline"></h1>
                 <p class="rules"></p>
             </header>
+            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <div class="surface-body"></div>
         </section>
     </template>
 
     <template id="tpl-compose">
         <section class="compose-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <div class="compose-status" hidden></div>
             <div class="compose-tabs" hidden>
                 <button type="button" class="tab-btn tab-active" data-tab="audio">record</button>
@@ -50,7 +52,7 @@
                     </button>
                     <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
                 </div>
-                <div class="compose-actions" hidden>
+                <div class="compose-actions" style="visibility:hidden">
                     <button type="button" class="send-btn" data-action="send"></button>
                 </div>
             </div>
@@ -65,7 +67,6 @@
 
     <template id="tpl-listen-ready">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <button type="button" class="send-btn listen-btn" data-action="listen">listen just once</button>
             <button type="button" class="send-btn" data-action="show-text" hidden>show text</button>
         </section>
@@ -73,7 +74,6 @@
 
     <template id="tpl-content">
         <section class="content-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <div class="played-audio" hidden>
                 <audio preload="metadata"></audio>
                 <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play message">
@@ -91,7 +91,7 @@
                 <button type="button" class="send-btn compact" data-action="copy-link">copy</button>
                 <button type="button" class="ghost-btn compact" data-action="share-link">share</button>
             </div>
-            <p class="inline-note" style="visibility:hidden">check the link yourself to see if it's been heard.</p>
+            <p class="inline-note" style="visibility:hidden">you can check the link to see if it's been heard.</p>
             <div class="push-prompt" hidden>
                 <p class="push-copy"></p>
                 <div class="push-actions">
@@ -104,7 +104,6 @@
 
     <template id="tpl-rally-sent">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <p class="sent-tick">tick.</p>
             <p class="inline-note"></p>
             <div class="push-prompt" hidden>
@@ -119,7 +118,6 @@
 
     <template id="tpl-empty">
         <section class="notice-card">
-            <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
             <p class="inline-note"></p>
             <div class="compose-actions">
                 <button type="button" class="ghost-btn" data-action="dismiss">dismiss</button>

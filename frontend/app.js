@@ -180,24 +180,55 @@ async function dispatch(event, payload = {}) {
     syncRecordCapabilities();
 
     // Same-state transitions that shouldn't trigger a full rerender:
-    // FIRST_SENT→FIRST_SENT (SEND_OK patches the link field) and
-    // LISTEN_PLAYING→LISTEN_PLAYING (BURN_OK updates data silently
-    // while audio keeps playing).
     if (prevState === State.FIRST_SENT && currentState === State.FIRST_SENT) {
         dom.patchFirstSent(currentData);
     } else if (prevState === State.LISTEN_PLAYING && currentState === State.LISTEN_PLAYING) {
         // BURN_OK — data updated (replyCode populated), no visual change
+    } else if (prevState === State.PROBE_LOADING && dom.patchFromProbe(currentState, currentData)) {
+        // Patched in-place — divider stays, headline/body fade in
     } else {
         dom.swapSurface(currentState, currentData);
     }
 
     // Audio plays fully on LISTEN_PLAYING before advancing to the
-    // reply screen. No early advance — the user hears the complete
-    // message, then sees "reply?" when it ends.
+    // reply screen. If the user pauses, a 15 s countdown starts —
+    // the play button fades away. Resuming cancels the countdown.
+    // No words; the dying button IS the countdown.
     if (currentState === State.LISTEN_PLAYING) {
         const audioEl = document.querySelector(".played-audio audio");
         if (audioEl) {
+            let pauseTimeout = null;
+
+            audioEl.addEventListener("pause", () => {
+                if (audioEl.ended) return;
+                const btn = document.querySelector(".played-audio .play-btn");
+                if (btn) btn.classList.add("is-paused-countdown");
+                pauseTimeout = setTimeout(() => {
+                    pauseTimeout = null;
+                    dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
+                }, 15000);
+            });
+
+            audioEl.addEventListener("play", () => {
+                const btn = document.querySelector(".played-audio .play-btn");
+                if (btn) {
+                    btn.classList.remove("is-paused-countdown");
+                    // Reset animation so it starts fresh on next pause
+                    btn.style.animation = "none";
+                    btn.offsetHeight; // force reflow
+                    btn.style.animation = "";
+                }
+                if (pauseTimeout) {
+                    clearTimeout(pauseTimeout);
+                    pauseTimeout = null;
+                }
+            });
+
             audioEl.addEventListener("ended", () => {
+                if (pauseTimeout) {
+                    clearTimeout(pauseTimeout);
+                    pauseTimeout = null;
+                }
                 dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
             }, { once: true });
         }

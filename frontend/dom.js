@@ -78,9 +78,12 @@ function appendCompose(target, props) {
 
     // Step reveal: record stack is the initial control; once audio is
     // captured, it gives way to the preview + send actions.
+    // compose-actions uses visibility (not hidden) so its height is
+    // always reserved in the layout — prevents vertical shift when
+    // the user finishes recording and the button appears.
     recordStack.hidden = hasAudio;
     audioPreview.hidden = !hasAudio;
-    audioActions.hidden = !hasAudio;
+    audioActions.style.visibility = hasAudio ? "visible" : "hidden";
 
     recordBtn.classList.toggle("is-recording", Boolean(props.recording));
     recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
@@ -229,12 +232,71 @@ export function patchFirstSent(props = {}) {
 }
 
 export function render_probe_loading() {
-    // Blank screen while the probe resolves (~200 ms). The real state
-    // (LISTEN_READY, PROBE_404, etc.) fades in via the reveal
-    // animation so there's no flash of incorrect content.
-    const frame = brandFrame("", "");
-    frame.style.opacity = "0";
+    // Render the expected headline invisibly to reserve layout height.
+    // The divider is visible from the start. When the probe resolves,
+    // patchFromProbe swaps the headline/body in-place (no surface
+    // replacement) so the divider never moves.
+    const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
+    frame.querySelector(".brand-block").style.visibility = "hidden";
+    frame.querySelector(".surface-body").style.visibility = "hidden";
     return frame;
+}
+
+// Patch the existing PROBE_LOADING surface in-place: update the
+// headline and body content without replacing the surface element.
+// The divider stays in the DOM untouched — zero layout shift.
+export function patchFromProbe(name, props = {}) {
+    const renderFn = {
+        LISTEN_READY: render_listen_ready,
+        PROBE_404: render_probe_404,
+        POST_LISTEN_TERMINAL: render_post_listen_terminal,
+        POST_LISTEN_BURN_LOSER: render_post_listen_burn_loser,
+    }[name];
+    if (!renderFn) return false;
+
+    const newFrame = renderFn(props);
+    const headline = app.querySelector(".headline");
+    const rules = app.querySelector(".rules");
+    const body = app.querySelector(".surface-body");
+    const brandBlock = app.querySelector(".brand-block");
+    const divider = app.querySelector(".divider");
+
+    // Transplant content from the new frame
+    const newHeadline = newFrame.querySelector(".headline");
+    const newRules = newFrame.querySelector(".rules");
+    const newBody = newFrame.querySelector(".surface-body");
+    const newDivider = newFrame.querySelector(".divider");
+
+    if (headline) headline.textContent = newHeadline?.textContent || "";
+    if (rules) {
+        rules.textContent = newRules?.textContent || "";
+        rules.hidden = newRules?.hidden || false;
+    }
+    if (body) body.replaceChildren(...newBody.childNodes);
+    if (divider && newDivider) divider.hidden = newDivider.hidden;
+
+    // Fade in the content around the already-visible divider
+    if (brandBlock) {
+        brandBlock.style.transition = "opacity 0.5s ease-out";
+        brandBlock.style.opacity = "0";
+        brandBlock.style.visibility = "visible";
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                brandBlock.style.opacity = "1";
+            });
+        });
+    }
+    if (body) {
+        body.style.transition = "opacity 0.5s ease-out";
+        body.style.opacity = "0";
+        body.style.visibility = "visible";
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                body.style.opacity = "1";
+            });
+        });
+    }
+    return true;
 }
 
 export function render_listen_playing(props = {}) {
@@ -246,19 +308,26 @@ export function render_listen_playing(props = {}) {
 
 export function render_probe_404() {
     const frame = brandFrame(copy.NOTHING_HERE, "");
-    frame.classList.add("is-empty");
     frame.querySelector(".rules").hidden = true;
+    const body = frame.querySelector(".surface-body");
+    const btn = document.createElement("a");
+    btn.href = "/";
+    btn.className = "send-btn";
+    btn.textContent = "confess";
+    btn.style.cssText = "text-decoration:none;align-self:center;width:70%;text-align:center;";
+    body.append(btn);
     return frame;
 }
 
 export function render_listen_ready(props = {}) {
     const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
+    // Slower fade-in (0.7s) — this is the first thing the recipient
+    // sees, give it a moment to breathe.
+    frame.style.animationDuration = "0.7s";
     const card = cloneTemplate("tpl-listen-ready");
     const listenBtn = card.querySelector('[data-action="listen"]');
     const textBtn = card.querySelector('[data-action="show-text"]');
     if (props.hasAudio === false) {
-        // Text-only content (e.g. end-here terminator). No audio
-        // drama — just a button to reveal the text.
         listenBtn.hidden = true;
         textBtn.hidden = false;
     }
@@ -427,7 +496,7 @@ export function syncComposer(props = {}) {
     }
 
     if (audioActions) {
-        audioActions.hidden = !hasAudio;
+        audioActions.style.visibility = hasAudio ? "visible" : "hidden";
     }
 
     if (sendBtn) {
