@@ -227,6 +227,11 @@ async function dispatch(event, payload = {}) {
             currentData.pushReason = resolvePushReason(result.result);
             if (currentState === State.RALLY_SENT && currentData.pushState === "resolved") {
                 await dispatch(Event.PUSH_RESOLVED, {});
+            } else if (currentState === State.FIRST_SENT) {
+                // Don't rerender — patchFirstSent already handled the
+                // URL, and a full rebuild jankily flashes the screen.
+                // Push on FIRST_SENT is triggered explicitly via
+                // copy-link, not via the inspect-push result.
             } else {
                 rerender();
             }
@@ -308,6 +313,10 @@ function installClickHandlers() {
             const rules = document.querySelector(".rules");
             if (rules) {
                 rules.textContent = tabName === "text" ? copy.RALLY_TEXT_RULES : copy.RALLY_RULES;
+            }
+            if (tabName === "text") {
+                const textarea = compose.querySelector(".compose-text");
+                if (textarea) textarea.focus();
             }
             return;
         }
@@ -404,14 +413,22 @@ function installClickHandlers() {
             await navigator.clipboard.writeText(currentData.url || "");
             action.textContent = "✓";
             action.disabled = true;
-            // Gentle fade in for the "check the link" hint
+            // Persist so rerenders (e.g. after push-subscribe) don't reset
+            currentData.copied = true;
+            // Gentle fade in for the "check the link" hint. Double-rAF
+            // ensures the browser paints at opacity 0 before the
+            // transition to 1 begins — single rAF can batch both in
+            // the same frame, causing a flash instead of a fade.
             const note = document.querySelector(".link-card .inline-note");
             if (note) {
-                note.style.transition = "opacity 0.5s ease-out";
+                note.style.transition = "none";
                 note.style.opacity = "0";
                 note.style.visibility = "visible";
                 requestAnimationFrame(() => {
-                    note.style.opacity = "1";
+                    requestAnimationFrame(() => {
+                        note.style.transition = "opacity 0.5s ease-out";
+                        note.style.opacity = "1";
+                    });
                 });
             }
             // Handing off the link is the explicit user gesture that

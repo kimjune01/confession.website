@@ -197,7 +197,18 @@ export function render_first_sent(props = {}) {
     if (actions) {
         actions.querySelectorAll("button").forEach((b) => { b.disabled = !props.url; });
     }
+    const copyBtn = card.querySelector('[data-action="copy-link"]');
     card.querySelector('[data-action="share-link"]').hidden = !navigator.share;
+    // Preserve the "copied" state across rerenders (e.g. after push-subscribe)
+    if (props.copied && copyBtn) {
+        copyBtn.textContent = "✓";
+        copyBtn.disabled = true;
+    }
+    const note = card.querySelector(".inline-note");
+    if (props.copied && note) {
+        note.style.visibility = "visible";
+        note.style.opacity = "1";
+    }
     renderPushPrompt(card, props);
     frame.querySelector(".surface-body").append(card);
     return frame;
@@ -218,14 +229,11 @@ export function patchFirstSent(props = {}) {
 }
 
 export function render_probe_loading() {
-    // Show the same UI as LISTEN_READY but with all buttons disabled.
-    // Probe fetch resolves in ~200 ms and the only visible change on
-    // transition is the buttons becoming enabled — continuity instead
-    // of an interstitial.
-    const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
-    const card = cloneTemplate("tpl-listen-ready");
-    card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-    frame.querySelector(".surface-body").append(card);
+    // Blank screen while the probe resolves (~200 ms). The real state
+    // (LISTEN_READY, PROBE_404, etc.) fades in via the reveal
+    // animation so there's no flash of incorrect content.
+    const frame = brandFrame("", "");
+    frame.style.opacity = "0";
     return frame;
 }
 
