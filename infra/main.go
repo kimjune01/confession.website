@@ -31,11 +31,25 @@ func main() {
 		// ── S3: audio storage ──
 		audioBucket, err := s3.NewBucket(ctx, "confession-audio", &s3.BucketArgs{
 			ForceDestroy: pulumi.Bool(true),
-			LifecycleRules: s3.BucketLifecycleRuleArray{
-				&s3.BucketLifecycleRuleArgs{
-					Enabled: pulumi.Bool(true),
-					Prefix:  pulumi.String("audio/"),
-					Expiration: &s3.BucketLifecycleRuleExpirationArgs{
+		})
+		if err != nil {
+			return err
+		}
+
+		// Lifecycle: 8-day expiration on audio/ prefix. One day past
+		// DDB TTL so any orphan blob left by a crashed handler is
+		// still swept. Provisioned as a standalone resource because
+		// the inline LifecycleRules field on Bucket is deprecated.
+		_, err = s3.NewBucketLifecycleConfigurationV2(ctx, "confession-audio-lifecycle", &s3.BucketLifecycleConfigurationV2Args{
+			Bucket: audioBucket.ID(),
+			Rules: s3.BucketLifecycleConfigurationV2RuleArray{
+				&s3.BucketLifecycleConfigurationV2RuleArgs{
+					Id:     pulumi.String("expire-audio"),
+					Status: pulumi.String("Enabled"),
+					Filter: &s3.BucketLifecycleConfigurationV2RuleFilterArgs{
+						Prefix: pulumi.String("audio/"),
+					},
+					Expiration: &s3.BucketLifecycleConfigurationV2RuleExpirationArgs{
 						Days: pulumi.Int(8),
 					},
 				},
