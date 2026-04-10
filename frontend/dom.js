@@ -251,12 +251,21 @@ export function render_probe_loading() {
 // Patch the existing PROBE_LOADING surface in-place: update the
 // headline and body content without replacing the surface element.
 // The divider stays in the DOM untouched — zero layout shift.
-export function patchFromProbe(name, props = {}) {
+// General in-place surface patch: render the target state, transplant
+// headline + body into the existing surface. The divider stays in the
+// DOM untouched — zero layout shift. Returns false if the target state
+// isn't patchable (caller should fall back to swapSurface).
+export function patchSurface(name, props = {}, { fadeDuration = 0.5, fadeHeadline = true } = {}) {
     const renderFn = {
+        LANDING: render_landing,
         LISTEN_READY: render_listen_ready,
+        LISTEN_PLAYING: render_listen_playing,
         PROBE_404: render_probe_404,
         POST_LISTEN_TERMINAL: render_post_listen_terminal,
         POST_LISTEN_BURN_LOSER: render_post_listen_burn_loser,
+        POST_LISTEN_RALLY: render_post_listen_rally,
+        POST_LISTEN_RALLY_REFRESH: render_post_listen_rally_refresh,
+        RALLY_SENT: render_rally_sent,
     }[name];
     if (!renderFn) return false;
 
@@ -273,38 +282,47 @@ export function patchFromProbe(name, props = {}) {
     const newBody = newFrame.querySelector(".surface-body");
     const newDivider = newFrame.querySelector(".divider");
 
-    // Swap headline: remove placeholder class + inner spans, set text
-    if (headline) {
-        headline.textContent = newHeadline?.textContent || "";
-        headline.classList.remove("placeholder-headline");
-    }
-    if (rules) {
-        rules.textContent = newRules?.textContent || "";
-        rules.hidden = newRules?.hidden || false;
-    }
-    if (body) body.replaceChildren(...newBody.childNodes);
     if (divider && newDivider) divider.hidden = newDivider.hidden;
 
-    // Cross-fade: headline transitions from placeholder to real text,
-    // body fades in from invisible.
-    if (brandBlock) {
-        brandBlock.style.transition = "opacity 0.5s ease-out";
-        brandBlock.style.opacity = "0";
+    // Cross-fade: placeholder fades out → content swaps → fades in.
+    // Opacity-only — no blur (too expensive even on fast hardware).
+    const swapAndFadeIn = () => {
+        if (fadeHeadline && headline) {
+            headline.textContent = newHeadline?.textContent || "";
+            headline.classList.remove("placeholder-headline");
+        }
+        if (fadeHeadline && rules) {
+            rules.textContent = newRules?.textContent || "";
+            rules.hidden = newRules?.hidden || false;
+        }
+        if (body) {
+            body.replaceChildren(...newBody.childNodes);
+            body.classList.remove("is-invisible");
+            body.style.opacity = "0";
+            body.style.transition = `opacity ${fadeDuration}s cubic-bezier(0.25, 0.1, 0.25, 1)`;
+        }
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                brandBlock.style.opacity = "1";
+                if (fadeHeadline && brandBlock) brandBlock.style.opacity = "1";
+                if (body) body.style.opacity = "1";
             });
         });
+    };
+
+    const ms = fadeDuration * 1000;
+    const easing = `opacity ${fadeDuration}s cubic-bezier(0.25, 0.1, 0.25, 1)`;
+    if (fadeHeadline && brandBlock) {
+        brandBlock.style.transition = easing;
+        brandBlock.style.opacity = "0";
     }
     if (body) {
-        body.style.transition = "opacity 0.5s ease-out";
-        body.style.opacity = "0";
-        body.classList.remove("is-invisible");
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                body.style.opacity = "1";
-            });
-        });
+        body.style.transition = easing;
+    }
+    if (fadeHeadline) {
+        setTimeout(swapAndFadeIn, ms);
+    } else {
+        // No headline fade — swap content immediately, only body fades in
+        swapAndFadeIn();
     }
     return true;
 }

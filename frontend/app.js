@@ -185,10 +185,23 @@ async function dispatch(event, payload = {}) {
         dom.patchFirstSent(currentData);
     } else if (prevState === State.LISTEN_PLAYING && currentState === State.LISTEN_PLAYING) {
         // BURN_OK — data updated (replyCode populated), no visual change
-    } else if (prevState === State.PROBE_LOADING && dom.patchFromProbe(currentState, currentData)) {
-        // Patched in-place — divider stays, headline/body fade in
+    } else if (
+        (prevState === State.PROBE_LOADING || prevState === State.LISTEN_PLAYING) &&
+        dom.patchSurface(currentState, currentData)
+    ) {
+        // Patched in-place — divider stays, content cross-fades
     } else {
-        dom.swapSurface(currentState, currentData);
+        // If the initial HTML surface still exists, patch it in-place
+        // instead of replacing — prevents layout shift on first render
+        // for both landing (/) and slug (/foo) pages.
+        const initial = document.getElementById("initial-surface");
+        if (initial) {
+            initial.removeAttribute("id");
+            initial.classList.add("no-reveal");
+            dom.patchSurface(currentState, currentData, { fadeDuration: 0.1 });
+        } else {
+            dom.swapSurface(currentState, currentData);
+        }
     }
 
     // Only bind listeners on state ENTRY (not same-state transitions
@@ -552,6 +565,15 @@ async function bootstrap() {
     });
     const boot = initialState(window.location.pathname, window.location.hash);
     if (boot.state === State.LANDING) {
+        // Remove the slug placeholder (not needed on landing).
+        // Rename the landing placeholder to initial-surface so the
+        // dispatch loop's patchSurface path picks it up.
+        const slugSurface = document.getElementById("initial-surface");
+        if (slugSurface) slugSurface.remove();
+        const landingSurface = document.getElementById("landing-surface");
+        if (landingSurface) {
+            landingSurface.id = "initial-surface";
+        }
         dispatch(Event.START_LANDING, {});
         return;
     }

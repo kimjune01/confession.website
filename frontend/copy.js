@@ -1,5 +1,5 @@
 export const LANDING_HEADLINE = "confession";
-export const LANDING_RULES = "for things you can't say in person.\none listen, then gone.";
+export const LANDING_RULES = "one listen, then gone.";
 
 export const LISTEN_READY_HEADER = "a message.";
 export const LISTEN_READY_RULES = "";

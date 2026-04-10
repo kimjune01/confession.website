@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>confession.website</title>
+    <title>confession</title>
     <link rel="preload" href="/fonts/charter_italic.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/fonts/IBMPlexSans-Regular-Latin1.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/style.css">
@@ -11,15 +11,31 @@
 <body>
     <div class="site-shell">
         <main id="app" class="app" aria-live="polite">
-            <section class="surface" id="initial-surface">
+            <section class="surface no-reveal" id="landing-surface" style="display:none">
                 <header class="brand-block">
-                    <h1 class="headline placeholder-headline">❥ † <span style="display:inline-block;transform:scaleX(-1)">❥</span></h1>
+                    <h1 class="headline placeholder-headline">❥ †&emsp;<span style="display:inline-block;transform:scaleX(-1)">❥</span></h1>
+                    <p class="rules placeholder-headline">❀&emsp;❀&emsp;❀</p>
+                </header>
+                <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
+                <div class="surface-body" style="opacity:0.15">
+                    <section class="compose-card">
+                        <div class="record-stack">
+                            <div class="record-row">
+                                <button class="record-btn" disabled><span class="record-icon" style="background:transparent"></span></button>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </section>
+            <section class="surface" id="initial-surface" style="display:none">
+                <header class="brand-block">
+                    <h1 class="headline placeholder-headline">❥ †&emsp;<span style="display:inline-block;transform:scaleX(-1)">❥</span></h1>
                     <p class="rules"></p>
                 </header>
                 <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
-                <div class="surface-body">
+                <div class="surface-body" style="opacity:0.25">
                     <section class="notice-card">
-                        <button type="button" class="send-btn" disabled style="align-self:center;width:70%;opacity:0.25">· · ·</button>
+                        <button type="button" class="send-btn" disabled style="align-self:center;width:70%">· · ·</button>
                     </section>
                 </div>
             </section>
@@ -65,7 +81,7 @@
                     </button>
                     <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
                 </div>
-                <div class="compose-actions" style="visibility:hidden">
+                <div class="compose-actions is-invisible">
                     <button type="button" class="send-btn" data-action="send"></button>
                 </div>
             </div>
@@ -138,6 +154,18 @@
         </section>
     </template>
 
+    <script>
+    // Sync: show the right placeholder before JS modules load.
+    // Slug pages get the full placeholder (headline + divider + button).
+    // Landing gets just the divider + ornament.
+    if (location.pathname.length > 1) {
+        var s = document.getElementById('initial-surface');
+        if (s) s.style.display = '';
+    } else {
+        var l = document.getElementById('landing-surface');
+        if (l) l.style.display = '';
+    }
+    </script>
     <script type="module" src="/app.js"></script>
 </body>
 </html>

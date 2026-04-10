@@ -128,11 +128,11 @@ input {
     max-width: 560px;
     height: 700px;
     max-height: 100dvh;
-    padding: 3.5rem 2rem;
+    padding: 8rem 2rem 2rem;
     text-align: center;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
 }
 
 /* ----- surface frame ---------------------------------------- */
@@ -244,7 +244,7 @@ input {
 .link-card {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 0.75rem;
 }
 
 /* Stylized horizontal divider: thin line flanked by black-feathered
@@ -671,6 +671,7 @@ input {
     display: flex;
     justify-content: center;
     gap: 2.5rem;
+    margin-bottom: 0.25rem;
 }
 
 .tab-btn {
@@ -729,10 +730,17 @@ input {
 }
 
 /* Audio panel uses the existing record-stack / audio-preview styling. */
+/* Both tab panels share a min-height so switching between record
+ * and text doesn't change the card height → no layout shift. */
+.tab-panel-audio,
+.tab-panel-text {
+    min-height: 180px;
+}
+
 .tab-panel-audio {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: 1rem;
 }
 
 .compose-actions .send-btn,
@@ -779,6 +787,11 @@ input {
     opacity: 0.5;
     font-style: normal !important;
     letter-spacing: 0.3em;
+    /* Override the headline's background-clip:text gradient — it
+     * doesn't clip correctly through the scaleX(-1) flipped span,
+     * making the right side appear more transparent. Flat color. */
+    -webkit-text-fill-color: currentColor;
+    background-image: none;
 }
 
 
