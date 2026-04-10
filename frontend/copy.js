@@ -18,8 +18,8 @@ export const NOTHING_HERE = "nothing here.";
 export const PROBE_LOADING_HEADLINE = "opening the link.";
 export const PROBE_LOADING_RULES = "";
 
-export const FIRST_SENT_HEADLINE = "honesty is\ncourage.";
-export const FIRST_SENT_RULES = "hand this link to one person.\nthey will be able to reply.";
+export const FIRST_SENT_HEADLINE = "honest : brave";
+export const FIRST_SENT_RULES = "they will be able to reply.";
 export const RALLY_SENT_HEADLINE = "sent.";
 export const RALLY_SENT_RULES = "they can reply back.";
 export const RALLY_SENT_NOTE = "";

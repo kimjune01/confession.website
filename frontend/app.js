@@ -578,10 +578,15 @@ async function bootstrap() {
         return;
     }
     if (boot.state === State.PROBE_LOADING) {
+        // Remove the landing preloader — slug pages use initial-surface
+        const landingSurface = document.getElementById("landing-surface");
+        if (landingSurface) landingSurface.remove();
         dispatch(Event.START_PROBE, { slug: boot.data.slug });
         return;
     }
     if (boot.state === State.POST_LISTEN_RALLY_REFRESH) {
+        const landingSurface2 = document.getElementById("landing-surface");
+        if (landingSurface2) landingSurface2.remove();
         // Probe first: if the slug has a NEW pending message (not
         // replyable — the old turn was replaced), ignore the stale
         // fragment and enter the normal listen flow. If replyable,

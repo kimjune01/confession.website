@@ -53,10 +53,12 @@ url_a=$(echo "$resp" | jq -r '.url')
 [[ "$url_a" == "https://confession.website/$slug_a" ]] || fail "unexpected url: $url_a"
 green "    slug=$slug_a"
 
-step "2. GET /api/slug/$slug_a (probe → pending)"
-http_code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/slug/$slug_a")
-[[ "$http_code" == "200" ]] || fail "probe expected 200, got $http_code"
-green "    pending"
+step "2. GET /api/slug/$slug_a (probe → pending, no has_audio for text-only)"
+resp=$(curl -sS "$API/api/slug/$slug_a")
+http_code=$(echo "$resp" | jq -r 'empty' 2>/dev/null && echo 200 || echo fail)
+has_audio=$(echo "$resp" | jq -r '.has_audio // empty')
+[[ -z "$has_audio" ]] || fail "text-only slug should not have has_audio, got '$has_audio'"
+green "    pending, has_audio absent"
 
 step "3. POST /api/slug/$slug_a/listen (text-only burn → terminal)"
 resp=$(curl -sS -X POST "$API/api/slug/$slug_a/listen")
@@ -85,6 +87,26 @@ slug_b=$(echo "$resp" | jq -r '.slug')
 [[ -n "$slug_b" && "$slug_b" != "null" ]] || fail "no slug in audio compose: $resp"
 green "    slug=$slug_b"
 
+step "5a. GET /api/slug/$slug_b (probe → has_audio:true)"
+resp=$(curl -sS "$API/api/slug/$slug_b")
+has_audio=$(echo "$resp" | jq -r '.has_audio // empty')
+[[ "$has_audio" == "true" ]] || fail "audio slug should have has_audio:true, got '$has_audio'"
+green "    has_audio=true"
+
+step "5b. GET /api/slug/$slug_b/peek (read-only, audio round-trip)"
+resp=$(curl -sS "$API/api/slug/$slug_b/peek")
+peek_audio=$(echo "$resp" | jq -r '.audio_b64 // empty')
+peek_mime=$(echo "$resp" | jq -r '.audio_mime // empty')
+[[ -n "$peek_audio" ]] || fail "peek: no audio_b64"
+[[ "$peek_audio" == "$SAMPLE_B64" ]] || fail "peek: audio bytes did not round-trip"
+[[ "$peek_mime" == "$OPUS_MIME" ]] || fail "peek: mime mismatch '$peek_mime'"
+green "    peek audio round-tripped (no burn)"
+
+step "5c. GET /api/slug/$slug_b (probe → still 200 after peek, not burned)"
+http_code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/slug/$slug_b")
+[[ "$http_code" == "200" ]] || fail "probe after peek expected 200 (peek is read-only), got $http_code"
+green "    still pending after peek"
+
 step "6. POST /api/slug/$slug_b/listen (audio + text round trip)"
 resp=$(curl -sS -X POST "$API/api/slug/$slug_b/listen")
 text_back=$(echo "$resp" | jq -r '.text // empty')
@@ -99,6 +121,21 @@ terminated=$(echo "$resp" | jq -r '.terminated')
 [[ -n "$reply_code" ]] || fail "no reply_code"
 [[ "$terminated" == "false" ]] || fail "audio consume should not terminate"
 green "    audio bytes round-tripped (1024 bytes), reply_code=$reply_code"
+
+step "6a. GET /api/slug/$slug_b (probe → replyable after burn)"
+resp=$(curl -sS "$API/api/slug/$slug_b")
+http_code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/slug/$slug_b")
+replyable=$(echo "$resp" | jq -r '.replyable // empty')
+reply_exp=$(echo "$resp" | jq -r '.reply_code_exp // empty')
+[[ "$http_code" == "200" ]] || fail "probe after burn expected 200 (reply window open), got $http_code"
+[[ "$replyable" == "true" ]] || fail "burned slug with open reply window should have replyable:true, got '$replyable'"
+[[ -n "$reply_exp" ]] || fail "expected reply_code_exp on replyable probe"
+green "    replyable=true reply_code_exp=$reply_exp"
+
+step "6b. GET /api/slug/$slug_b/peek (peek after burn → 404)"
+http_code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/api/slug/$slug_b/peek")
+[[ "$http_code" == "404" ]] || fail "peek after burn expected 404 (tail burned), got $http_code"
+green "    peek correctly 404 after burn"
 
 step "7. POST /api/slug/$slug_b/compose (rally with valid reply_code)"
 http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -194,6 +231,8 @@ step "13. Static frontend served from site Lambda"
 http_code=$(curl -sS -o /tmp/index-body -w '%{http_code}' "$API/")
 [[ "$http_code" == "200" ]] || fail "GET / expected 200, got $http_code"
 grep -q '<title>' /tmp/index-body || fail "/ did not return HTML with <title>"
+grep -q 'data-vapid-public-key="B' /tmp/index-body || fail "/ missing VAPID public key in HTML"
+green "    VAPID public key injected"
 rm -f /tmp/index-body
 
 http_code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/style.css")
