@@ -427,8 +427,11 @@ export function render_post_listen_burn_loser(props = {}) {
 
 export function render_rally_sent(props = {}) {
     const headline = props.ended ? copy.RALLY_ENDED_HEADLINE : copy.RALLY_SENT_HEADLINE;
-    const rules = props.ended ? copy.RALLY_ENDED_RULES : copy.RALLY_SENT_RULES;
-    const frame = brandFrame(headline, rules);
+    let rulesText = props.ended ? copy.RALLY_ENDED_RULES : copy.RALLY_SENT_RULES;
+    if (!props.ended && props.pushGranted) {
+        rulesText = "you'll be notified when they reply.";
+    }
+    const frame = brandFrame(headline, rulesText);
     const card = cloneTemplate("tpl-rally-sent");
     const note = card.querySelector(".inline-note");
 
@@ -449,11 +452,11 @@ export function render_rally_sent(props = {}) {
         const prompt = card.querySelector(".push-prompt");
         if (prompt) prompt.hidden = true;
     } else if (props.pushGranted) {
-        note.textContent = "you'll be notified when they reply.";
+        note.hidden = true;
         const prompt = card.querySelector(".push-prompt");
         if (prompt) prompt.hidden = true;
     } else {
-        note.textContent = "check the link later to see if they replied.";
+        note.textContent = "you can check the link to see if they replied.";
         const prompt = card.querySelector(".push-prompt");
         if (prompt) prompt.hidden = true;
     }
