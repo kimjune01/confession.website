@@ -2,8 +2,8 @@ export const LANDING_HEADLINE = "a voice channel for things you can't say in per
 export const LANDING_RULES = "one week. burns when heard. audio keeps it going. text ends it.";
 export const LISTEN_READY_HEADER = "a message is waiting.";
 export const LISTEN_READY_RULES = "listening plays the audio and shows the text once. both burn together.";
-export const LISTEN_LOADING_HEADER = "burning the pending turn.";
-export const LISTEN_LOADING_RULES = "loading before the burn still counts as engagement.";
+export const LISTEN_LOADING_HEADER = "opening the message.";
+export const LISTEN_LOADING_RULES = "";
 export const RALLY_HEADER = "your turn.";
 export const RALLY_RULES = "audio keeps the rally going. text ends the channel.";
 export const REFRESH_RULES = "the fragment still carries the reply code. hurry; the server decides the real deadline.";
@@ -29,7 +29,13 @@ export const LISTEN_BUTTON = "listen";
 export const COPY_DONE = "copied.";
 export const LANDING_STATUS_REQUIRED = "record audio, write text, or do both.";
 export const LANDING_STATUS_RECORDING_UNAVAILABLE = "microphone unavailable. text still works.";
-export const LANDING_STATUS_RECORDING = "record again to stop early.";
+// Caption shown under the record button BEFORE recording starts.
+export const RECORD_CAPTION_READY = "tap to record. audio keeps the rally going.";
+// Caption shown under the record button WHILE recording.
+export const RECORD_CAPTION_RECORDING = "recording — tap to stop.";
+// Legacy name kept for any lingering refs; points at the ready caption
+// so the surface never says "record again" before a recording exists.
+export const LANDING_STATUS_RECORDING = RECORD_CAPTION_READY;
 export const LANDING_STATUS_SENDING = "sending...";
 export const RALLY_STATUS_EXPIRED = "the reply window closed.";
 export const RALLY_STATUS_UNKNOWN = "turn lost. the write may still have landed.";

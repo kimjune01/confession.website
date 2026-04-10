@@ -115,14 +115,32 @@ const effectHandlers = {
             };
         }
         if (result.reason === "network") {
+            // Transport failed mid-send; server may or may not have
+            // committed. Per SPEC §POST /api/slug/<id>/compose "Not
+            // idempotent", don't retry automatically. Keep the draft.
             return {
                 event: "SEND_UNKNOWN",
-                payload: { currentData: payload.currentData, status: "turn lost. the write may still have landed." },
+                payload: {
+                    currentData: payload.currentData,
+                    status: "turn lost. the write may still have landed.",
+                },
             };
+        }
+        if (result.status === 404) {
+            // Reply code consumed, expired, or slug gone. Channel dead.
+            return {
+                event: "SEND_STALE",
+                payload: { currentData: payload.currentData },
+            };
+        }
+        // 400 (malformed), anything else → keep the draft, surface status.
+        let status = result.data?.error || "send rejected.";
+        if (result.status === 400) {
+            status = result.data?.error || "that reply was rejected. check the text or audio.";
         }
         return {
             event: "SEND_REJECTED",
-            payload: { currentData: payload.currentData, status: result.data?.error || "reply code spent or expired." },
+            payload: { currentData: payload.currentData, status },
         };
     },
     "write-fragment": async (payload) => {

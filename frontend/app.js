@@ -23,7 +23,11 @@ function syncLiveComposer() {
     syncRecordCapabilities();
     dom.syncComposer({
         ...currentData,
-        recordCaption: currentData.canRecord ? copy.LANDING_STATUS_RECORDING : copy.LANDING_STATUS_RECORDING_UNAVAILABLE,
+        recordCaption: !currentData.canRecord
+            ? copy.LANDING_STATUS_RECORDING_UNAVAILABLE
+            : currentData.recording
+                ? copy.RECORD_CAPTION_RECORDING
+                : copy.RECORD_CAPTION_READY,
     });
 }
 
@@ -61,6 +65,17 @@ async function dispatch(event, payload = {}) {
     }
 
     const tx = transition(currentState, event, { ...payload, currentData });
+
+    // Revoke any outstanding draft blob URL that the next data frame
+    // is about to drop. Without this, repeated rally turns leak blob:
+    // URLs until reload. Only fires when the next data frame doesn't
+    // carry the same audio object forward.
+    const prevAudioUrl = currentData.audio?.url;
+    const nextAudioUrl = tx.data?.audio?.url;
+    if (prevAudioUrl && prevAudioUrl !== nextAudioUrl) {
+        URL.revokeObjectURL(prevAudioUrl);
+    }
+
     currentState = tx.next;
     currentData = tx.data || {};
     syncRecordCapabilities();

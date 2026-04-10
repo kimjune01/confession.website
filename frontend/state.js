@@ -25,7 +25,16 @@ export const Event = {
     LISTEN_404: "LISTEN_404",
     SEND_TAP: "SEND_TAP",
     SEND_OK: "SEND_OK",
+    // Content rejection (400, 409 for user-supplied slug). Draft stays
+    // alive; surface a status message and let the user retry.
     SEND_REJECTED: "SEND_REJECTED",
+    // Reply-code stale / expired / slug gone (404 on rally compose).
+    // The channel is dead; transition to PROBE_404.
+    SEND_STALE: "SEND_STALE",
+    // Network / transport failure with unknown commit outcome. SPEC
+    // §POST /api/slug/<id>/compose says the write MAY have landed;
+    // don't nuke the draft — keep the surface and let the user see
+    // that something's wrong.
     SEND_UNKNOWN: "SEND_UNKNOWN",
     COUNTDOWN_EXPIRED: "COUNTDOWN_EXPIRED",
     DISMISS: "DISMISS",
@@ -191,13 +200,27 @@ export function transition(current, event, payload = {}) {
             invalid(current, event);
             break;
         case Event.SEND_REJECTED:
-            if (current === State.LANDING) {
+            // Content rejection: 400 (text too long, bad audio, bad
+            // reply_code format) or 409 (user-supplied slug collision
+            // on first-turn). Keep the draft alive, clear sending,
+            // surface the error status. Applies on LANDING and on
+            // both rally surfaces.
+            if (
+                current === State.LANDING ||
+                current === State.POST_LISTEN_RALLY ||
+                current === State.POST_LISTEN_RALLY_REFRESH
+            ) {
                 return {
-                    next: State.LANDING,
+                    next: current,
                     effects: [],
                     data: withDraft(payload, { sending: false, status: payload.status || "" }),
                 };
             }
+            invalid(current, event);
+            break;
+        case Event.SEND_STALE:
+            // Reply code consumed / expired / slug gone. The channel
+            // is dead — transition to PROBE_404 and clear the fragment.
             if (current === State.POST_LISTEN_RALLY || current === State.POST_LISTEN_RALLY_REFRESH) {
                 return {
                     next: State.PROBE_404,
@@ -208,18 +231,20 @@ export function transition(current, event, payload = {}) {
             invalid(current, event);
             break;
         case Event.SEND_UNKNOWN:
-            if (current === State.LANDING) {
+            // Transport-level failure with unknown commit outcome.
+            // SPEC is explicit: the server MAY have committed, the
+            // client just can't tell. Preserve the draft and the
+            // surface so the user sees the failure in context — do
+            // NOT clear the fragment or drop to PROBE_404.
+            if (
+                current === State.LANDING ||
+                current === State.POST_LISTEN_RALLY ||
+                current === State.POST_LISTEN_RALLY_REFRESH
+            ) {
                 return {
-                    next: State.LANDING,
+                    next: current,
                     effects: [],
                     data: withDraft(payload, { sending: false, status: payload.status || "" }),
-                };
-            }
-            if (current === State.POST_LISTEN_RALLY || current === State.POST_LISTEN_RALLY_REFRESH) {
-                return {
-                    next: State.PROBE_404,
-                    effects: ["clear-fragment", "stop-countdown"],
-                    data: { slug: payload.currentData?.slug || "" },
                 };
             }
             invalid(current, event);

@@ -129,7 +129,11 @@ export function render_landing(props = {}) {
         ...props,
         phase: null,
         hideSlug: false,
-        recordCaption: props.canRecord ? copy.LANDING_STATUS_RECORDING : copy.LANDING_STATUS_RECORDING_UNAVAILABLE,
+        recordCaption: !props.canRecord
+            ? copy.LANDING_STATUS_RECORDING_UNAVAILABLE
+            : props.recording
+                ? copy.RECORD_CAPTION_RECORDING
+                : copy.RECORD_CAPTION_READY,
     });
     return frame;
 }
@@ -184,7 +188,11 @@ export function render_post_listen_rally(props = {}) {
     appendCompose(body, {
         ...props,
         hideSlug: true,
-        recordCaption: props.canRecord ? copy.LANDING_STATUS_RECORDING : copy.LANDING_STATUS_RECORDING_UNAVAILABLE,
+        recordCaption: !props.canRecord
+            ? copy.LANDING_STATUS_RECORDING_UNAVAILABLE
+            : props.recording
+                ? copy.RECORD_CAPTION_RECORDING
+                : copy.RECORD_CAPTION_READY,
     });
     return frame;
 }
