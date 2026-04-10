@@ -83,12 +83,12 @@ function appendCompose(target, props) {
     // the user finishes recording and the button appears.
     recordStack.hidden = hasAudio;
     audioPreview.hidden = !hasAudio;
-    audioActions.style.visibility = hasAudio ? "visible" : "hidden";
+    audioActions.classList.toggle("is-invisible", !hasAudio);
 
     recordBtn.classList.toggle("is-recording", Boolean(props.recording));
     recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
     recordTime.textContent = formatSeconds(props.recordSeconds || 0);
-    recordTime.style.visibility = props.recording ? "visible" : "hidden";
+    recordTime.classList.toggle("is-invisible", !props.recording);
     recordCaption.textContent = props.recordCaption || "";
     recordCaption.hidden = !props.recordCaption;
 
@@ -239,14 +239,13 @@ export function render_probe_loading() {
     if (existing) {
         existing.removeAttribute("id");
         // Remove the reveal animation so the divider doesn't fade
-        existing.style.animation = "none";
-        existing.style.opacity = "1";
+        existing.classList.add("no-reveal");
         return existing;
     }
     // Fallback for non-slug pages that don't have the initial surface
     const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
-    frame.querySelector(".brand-block").style.visibility = "hidden";
-    frame.querySelector(".surface-body").style.visibility = "hidden";
+    frame.querySelector(".brand-block").classList.add("is-invisible");
+    frame.querySelector(".surface-body").classList.add("is-invisible");
     return frame;
 }
 
@@ -320,9 +319,8 @@ export function render_probe_404() {
     const body = frame.querySelector(".surface-body");
     const btn = document.createElement("a");
     btn.href = "/";
-    btn.className = "send-btn";
+    btn.className = "send-btn send-btn-link";
     btn.textContent = "confess";
-    btn.style.cssText = "text-decoration:none;align-self:center;width:70%;text-align:center;";
     body.append(btn);
     return frame;
 }
@@ -482,7 +480,7 @@ export function syncComposer(props = {}) {
 
     if (recordTime) {
         recordTime.textContent = formatSeconds(props.recordSeconds || 0);
-        recordTime.style.visibility = props.recording ? "visible" : "hidden";
+        recordTime.classList.toggle("is-invisible", !props.recording);
     }
 
     if (recordCaption) {
@@ -504,7 +502,7 @@ export function syncComposer(props = {}) {
     }
 
     if (audioActions) {
-        audioActions.style.visibility = hasAudio ? "visible" : "hidden";
+        audioActions.classList.toggle("is-invisible", !hasAudio);
     }
 
     if (sendBtn) {

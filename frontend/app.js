@@ -6,6 +6,7 @@ import { canRecord, recordingState, startRecording, stopRecording, NoMicError, P
 import { dynamicRecordCap } from "/countdown.js";
 import { readReplyCode } from "/fragment.js";
 import * as copy from "/copy.js";
+import { buildContent } from "/content.js";
 
 let currentState = State.PROBE_404;
 let currentData = {};
@@ -401,13 +402,8 @@ function installClickHandlers() {
                 dom.swapSurface(currentState, currentData);
                 return;
             }
-            const data = result.data;
-            let audioUrl = null;
-            if (data.audio_b64 && data.audio_mime) {
-                audioUrl = `data:${data.audio_mime};base64,${data.audio_b64}`;
-            }
             currentState = State.POST_LISTEN_TERMINAL;
-            currentData = { slug, content: { text: data.text || "", audioUrl } };
+            currentData = { slug, content: buildContent(result.data) };
             dom.swapSurface(currentState, currentData);
             return;
         }

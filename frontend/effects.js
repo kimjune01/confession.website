@@ -3,22 +3,12 @@ import * as audio from "/audio.js";
 import * as countdown from "/countdown.js";
 import * as fragment from "/fragment.js";
 import * as push from "/push.js";
+import { buildContent } from "/content.js";
 
 let emit = () => {};
 
 export function setEmitter(fn) {
     emit = fn;
-}
-
-function buildContent(data) {
-    let audioUrl = null;
-    if (data.audio_b64 && data.audio_mime) {
-        audioUrl = `data:${data.audio_mime};base64,${data.audio_b64}`;
-    }
-    return {
-        text: data.text || "",
-        audioUrl,
-    };
 }
 
 const effectHandlers = {

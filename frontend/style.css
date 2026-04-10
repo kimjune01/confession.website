@@ -146,10 +146,6 @@ input {
     transition: opacity 0.3s ease-out;
 }
 
-.surface.is-leaving {
-    opacity: 0.25;
-}
-
 .brand-block {
     display: flex;
     flex-direction: column;
@@ -778,6 +774,23 @@ input {
 
 .surface.is-empty .headline {
     font-size: 2rem;
+}
+
+/* Utility: hide an element while preserving its layout space.
+ * Used by JS to toggle visibility without disrupting flow. */
+.is-invisible { visibility: hidden; }
+
+/* Suppress the reveal animation on surfaces that are already
+ * in their final position (e.g. PROBE_LOADING reuse). */
+.no-reveal { animation: none; opacity: 1; }
+
+/* Anchor styled as a send-btn in the 404 state — overrides default
+ * link decoration and centers it within the flex column. */
+.send-btn-link {
+    text-decoration: none;
+    align-self: center;
+    width: 70%;
+    text-align: center;
 }
 
 /* ----- animations ------------------------------------------- */
