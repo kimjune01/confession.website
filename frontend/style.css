@@ -772,9 +772,15 @@ input {
 
 /* ----- empty / 404 state ------------------------------------ */
 
-.surface.is-empty .headline {
-    font-size: 2rem;
+/* Ornamental placeholder shown while the probe resolves. Muted so
+ * it reads as decorative, not content. Replaced by real headline
+ * when patchFromProbe fires. */
+.placeholder-headline {
+    opacity: 0.5;
+    font-style: normal !important;
+    letter-spacing: 0.3em;
 }
+
 
 /* Utility: hide an element while preserving its layout space.
  * Used by JS to toggle visibility without disrupting flow. */

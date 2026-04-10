@@ -12,12 +12,16 @@
     <div class="site-shell">
         <main id="app" class="app" aria-live="polite">
             <section class="surface" id="initial-surface">
-                <header class="brand-block" style="visibility:hidden">
-                    <h1 class="headline"></h1>
+                <header class="brand-block">
+                    <h1 class="headline placeholder-headline">❥ † <span style="display:inline-block;transform:scaleX(-1)">❥</span></h1>
                     <p class="rules"></p>
                 </header>
                 <div class="divider" aria-hidden="true"><span class="divider-end divider-end-left">➸</span><svg class="divider-line" viewBox="0 0 200 6" preserveAspectRatio="none"><ellipse cx="100" cy="3" rx="100" ry="3" fill="currentColor"/></svg><span class="divider-end">➸</span></div>
-                <div class="surface-body" style="visibility:hidden"></div>
+                <div class="surface-body">
+                    <section class="notice-card">
+                        <button type="button" class="send-btn" disabled style="align-self:center;width:70%;opacity:0.25">· · ·</button>
+                    </section>
+                </div>
             </section>
         </main>
     </div>

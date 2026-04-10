@@ -244,7 +244,6 @@ export function render_probe_loading() {
     }
     // Fallback for non-slug pages that don't have the initial surface
     const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
-    frame.querySelector(".brand-block").classList.add("is-invisible");
     frame.querySelector(".surface-body").classList.add("is-invisible");
     return frame;
 }
@@ -274,7 +273,11 @@ export function patchFromProbe(name, props = {}) {
     const newBody = newFrame.querySelector(".surface-body");
     const newDivider = newFrame.querySelector(".divider");
 
-    if (headline) headline.textContent = newHeadline?.textContent || "";
+    // Swap headline: remove placeholder class + inner spans, set text
+    if (headline) {
+        headline.textContent = newHeadline?.textContent || "";
+        headline.classList.remove("placeholder-headline");
+    }
     if (rules) {
         rules.textContent = newRules?.textContent || "";
         rules.hidden = newRules?.hidden || false;
@@ -282,11 +285,11 @@ export function patchFromProbe(name, props = {}) {
     if (body) body.replaceChildren(...newBody.childNodes);
     if (divider && newDivider) divider.hidden = newDivider.hidden;
 
-    // Fade in the content around the already-visible divider
+    // Cross-fade: headline transitions from placeholder to real text,
+    // body fades in from invisible.
     if (brandBlock) {
         brandBlock.style.transition = "opacity 0.5s ease-out";
         brandBlock.style.opacity = "0";
-        brandBlock.style.visibility = "visible";
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 brandBlock.style.opacity = "1";
@@ -296,7 +299,7 @@ export function patchFromProbe(name, props = {}) {
     if (body) {
         body.style.transition = "opacity 0.5s ease-out";
         body.style.opacity = "0";
-        body.style.visibility = "visible";
+        body.classList.remove("is-invisible");
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 body.style.opacity = "1";
@@ -315,7 +318,6 @@ export function render_listen_playing(props = {}) {
 
 export function render_probe_404() {
     const frame = brandFrame(copy.NOTHING_HERE, "");
-    frame.querySelector(".rules").hidden = true;
     const body = frame.querySelector(".surface-body");
     const btn = document.createElement("a");
     btn.href = "/";
