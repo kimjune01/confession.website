@@ -186,7 +186,7 @@ async function dispatch(event, payload = {}) {
     } else if (prevState === State.LISTEN_PLAYING && currentState === State.LISTEN_PLAYING) {
         // BURN_OK — data updated (replyCode populated), no visual change
     } else if (
-        (prevState === State.PROBE_LOADING || prevState === State.LISTEN_PLAYING) &&
+        prevState === State.PROBE_LOADING &&
         dom.patchSurface(currentState, currentData)
     ) {
         // Patched in-place — divider stays, content cross-fades
@@ -198,7 +198,7 @@ async function dispatch(event, payload = {}) {
         if (initial) {
             initial.removeAttribute("id");
             initial.classList.add("no-reveal");
-            dom.patchSurface(currentState, currentData, { fadeDuration: 0.1 });
+            dom.patchSurface(currentState, currentData, { fadeDuration: 0.5 });
         } else {
             dom.swapSurface(currentState, currentData);
         }
@@ -207,10 +207,59 @@ async function dispatch(event, payload = {}) {
     // Only bind listeners on state ENTRY (not same-state transitions
     // like BURN_OK which skip rerender but still reach this code).
     // Audio plays fully before advancing. 15 s pause countdown.
+    // Voice-activity glow mirrors playback level on the play button.
     if (currentState === State.LISTEN_PLAYING && prevState !== State.LISTEN_PLAYING) {
         const audioEl = document.querySelector(".played-audio audio");
         if (audioEl) {
             let pauseTimeout = null;
+            let playbackAnalyser = null;
+            let playbackRAF = null;
+
+            // Wire up playback glow — same pattern as recording glow
+            function startPlaybackGlow() {
+                try {
+                    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    if (ctx.state === "suspended") ctx.resume();
+                    const source = ctx.createMediaElementSource(audioEl);
+                    playbackAnalyser = ctx.createAnalyser();
+                    playbackAnalyser.fftSize = 256;
+                    source.connect(playbackAnalyser);
+                    source.connect(ctx.destination); // still output to speakers
+                    const dataArray = new Uint8Array(playbackAnalyser.frequencyBinCount);
+                    function tick() {
+                        if (!playbackAnalyser) return;
+                        playbackAnalyser.getByteFrequencyData(dataArray);
+                        let sum = 0;
+                        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                        const avg = sum / dataArray.length;
+                        const level = Math.min(avg / 80, 1);
+                        const btn = document.querySelector(".played-audio .play-btn");
+                        if (btn) btn.style.setProperty("--glow-intensity", String(level));
+                        playbackRAF = requestAnimationFrame(tick);
+                    }
+                    tick();
+                } catch {
+                    // Web Audio unavailable — no glow, playback still works
+                }
+            }
+
+            function stopPlaybackGlow() {
+                if (playbackRAF) {
+                    cancelAnimationFrame(playbackRAF);
+                    playbackRAF = null;
+                }
+                const btn = document.querySelector(".played-audio .play-btn");
+                if (btn) btn.style.setProperty("--glow-intensity", "0");
+            }
+
+            // Start glow on first play (createMediaElementSource can only be called once)
+            let glowStarted = false;
+            audioEl.addEventListener("play", () => {
+                if (!glowStarted) {
+                    glowStarted = true;
+                    startPlaybackGlow();
+                }
+            }, { once: true });
 
             audioEl.addEventListener("pause", () => {
                 if (audioEl.ended) return;
@@ -242,6 +291,7 @@ async function dispatch(event, payload = {}) {
                     clearTimeout(pauseTimeout);
                     pauseTimeout = null;
                 }
+                stopPlaybackGlow();
                 dispatch(Event.LISTEN_AUDIO_DONE, {}).catch(console.error);
             }, { once: true });
         }

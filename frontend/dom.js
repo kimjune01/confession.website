@@ -38,8 +38,8 @@ function appendCompose(target, props) {
     const countdown = audioPanel.querySelector(".countdown-card");
     const phase = audioPanel.querySelector(".countdown-phase");
     const time = audioPanel.querySelector(".countdown-time");
-    const recordStack = audioPanel.querySelector(".record-stack");
     const recordBtn = audioPanel.querySelector(".record-btn");
+    const recordStatus = audioPanel.querySelector(".record-status");
     const recordTime = audioPanel.querySelector(".record-time");
     const recordCaption = audioPanel.querySelector(".record-caption");
     const audioPreview = audioPanel.querySelector(".audio-preview");
@@ -59,8 +59,8 @@ function appendCompose(target, props) {
     }
 
     // Countdown and record-time share the same grid slot (.record-status).
-    // Toggle visibility so the occupied space stays constant.
-    countdown.classList.toggle("is-invisible", !props.phase);
+    // Mutually exclusive: recording timer wins when active, countdown otherwise.
+    countdown.classList.toggle("is-invisible", Boolean(props.recording) || !props.phase);
     if (props.phase) {
         phase.textContent = props.phase.replaceAll("-", " ");
         time.textContent = formatRemaining(props.remainingMs);
@@ -83,7 +83,8 @@ function appendCompose(target, props) {
     // compose-actions uses visibility (not hidden) so its height is
     // always reserved in the layout — prevents vertical shift when
     // the user finishes recording and the button appears.
-    recordStack.hidden = hasAudio;
+    recordBtn.hidden = hasAudio;
+    recordStatus.hidden = hasAudio;
     audioPreview.hidden = !hasAudio;
     audioActions.classList.toggle("is-invisible", !hasAudio);
 
@@ -91,8 +92,10 @@ function appendCompose(target, props) {
     recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
     recordTime.textContent = formatSeconds(props.recordSeconds || 0);
     recordTime.classList.toggle("is-invisible", !props.recording);
-    recordCaption.textContent = props.recordCaption || "";
-    recordCaption.hidden = !props.recordCaption;
+    if (recordCaption) {
+        recordCaption.textContent = props.recordCaption || "";
+        recordCaption.hidden = !props.recordCaption;
+    }
 
     if (hasAudio) {
         previewAudio.src = props.audio.url;
@@ -330,7 +333,7 @@ export function patchSurface(name, props = {}, { fadeDuration = 0.5, fadeHeadlin
 }
 
 export function render_listen_playing(props = {}) {
-    const frame = brandFrame(copy.LISTEN_READY_HEADER, "");
+    const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.RALLY_RULES);
     const body = frame.querySelector(".surface-body");
     appendContent(body, { ...props.content, autoplay: true });
     return frame;
@@ -467,8 +470,8 @@ export function syncComposer(props = {}) {
     const countdown = audioPanel?.querySelector(".countdown-card");
     const phase = audioPanel?.querySelector(".countdown-phase");
     const time = audioPanel?.querySelector(".countdown-time");
-    const recordStack = audioPanel?.querySelector(".record-stack");
     const recordBtn = audioPanel?.querySelector(".record-btn");
+    const recordStatus = audioPanel?.querySelector(".record-status");
     const recordTime = audioPanel?.querySelector(".record-time");
     const recordCaption = audioPanel?.querySelector(".record-caption");
     const audioPreview = audioPanel?.querySelector(".audio-preview");
@@ -484,15 +487,18 @@ export function syncComposer(props = {}) {
     }
 
     if (countdown && phase && time) {
-        countdown.classList.toggle("is-invisible", !props.phase);
+        countdown.classList.toggle("is-invisible", Boolean(props.recording) || !props.phase);
         phase.textContent = props.phase ? props.phase.replaceAll("-", " ") : "";
         time.textContent = props.phase ? formatRemaining(props.remainingMs) : "";
         compose.classList.toggle("is-overtime", props.phase === "overtime");
         compose.classList.toggle("is-refresh", props.phase === "refresh-degraded");
     }
 
-    if (recordStack) {
-        recordStack.hidden = hasAudio;
+    if (recordBtn) {
+        recordBtn.hidden = hasAudio;
+    }
+    if (recordStatus) {
+        recordStatus.hidden = hasAudio;
     }
 
     if (recordBtn) {

@@ -219,6 +219,7 @@ input {
     color: rgba(231, 221, 199, 0.42);
     font-size: 0.95rem;
     font-style: italic;
+    font-weight: 600;
     line-height: 1.6;
     white-space: pre-line;
 }
@@ -240,7 +241,7 @@ input {
 .surface-body {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-5);
+    gap: var(--sp-3);
 }
 
 /* ----- cards ------------------------------------------------- */
@@ -326,29 +327,10 @@ input {
     color: rgba(214, 106, 58, 0.72);
 }
 
-/* ----- record stack ----------------------------------------- */
-
-.record-stack {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--sp-4);
-}
-
-/* Record button + "end here" sit side-by-side on rally states so the
- * user reads them as alternatives — record a reply or end the channel
- * with a single glance. On landing (no rally-end) it's just the record
- * button centered. */
-.record-row {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: var(--sp-4);
-    padding: 2em 0;
-}
+/* ----- record button ---------------------------------------- */
 
 .record-btn {
+    margin: var(--sp-3) 0;
     --glow-intensity: 0;
     width: 86px;
     height: 86px;
@@ -502,11 +484,14 @@ input {
 }
 
 .play-btn {
+    --glow-intensity: 0;
     width: 86px;
     height: 86px;
     border-radius: 50%;
     border: 1px solid var(--brass-dim);
     background: transparent;
+    box-shadow:
+        0 0 calc(var(--glow-intensity) * 28px) calc(var(--glow-intensity) * 12px) rgba(204, 51, 51, calc(var(--glow-intensity) * 0.65));
     cursor: pointer;
     display: inline-flex;
     align-items: center;
@@ -624,14 +609,10 @@ input {
 .compose-actions {
     display: flex;
     gap: var(--sp-2);
-    justify-content: center;
+    width: 100%;
+    align-self: stretch;
 }
 
-/* Inside the tab panel, push the actions to the bottom so they
- * don't interfere with justify-content:center on visible content. */
-.tab-panel-audio .compose-actions {
-    margin-top: auto;
-}
 
 .push-actions {
     display: flex;
@@ -711,7 +692,7 @@ input {
     font-variant-caps: all-small-caps;
     letter-spacing: 0.08em;
     min-height: 44px;
-    padding: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
     cursor: pointer;
     transition: color 0.2s, border-color 0.2s;
 }
@@ -766,16 +747,7 @@ input {
 .tab-panel-audio {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
-    min-height: 180px;
-}
-
-.audio-center {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: var(--sp-3);
 }
 
@@ -783,6 +755,8 @@ input {
 .compose-actions .ghost-btn {
     flex: none;
     width: 70%;
+    white-space: nowrap;
+    margin: 0 auto;
 }
 
 .push-actions .send-btn,

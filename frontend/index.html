@@ -61,29 +61,22 @@
                 <button type="button" class="tab-btn" data-tab="text">text</button>
             </div>
             <div class="tab-panel-audio">
-                <div class="audio-center">
-                    <div class="record-stack">
-                        <div class="record-row">
-                            <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
-                                <span class="record-icon"></span>
-                            </button>
-                        </div>
-                        <div class="record-status">
-                            <p class="record-time">0:00</p>
-                            <div class="countdown-card">
-                                <p class="countdown-phase"></p>
-                                <p class="countdown-time"></p>
-                            </div>
-                        </div>
-                        <p class="record-caption"></p>
+                <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
+                    <span class="record-icon"></span>
+                </button>
+                <div class="record-status">
+                    <p class="record-time">0:00</p>
+                    <div class="countdown-card">
+                        <p class="countdown-phase"></p>
+                        <p class="countdown-time"></p>
                     </div>
-                    <div class="audio-preview" hidden>
-                        <audio preload="metadata"></audio>
-                        <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play recording">
-                            <span class="play-icon">▶</span>
-                        </button>
-                        <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
-                    </div>
+                </div>
+                <div class="audio-preview" hidden>
+                    <audio preload="metadata"></audio>
+                    <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play recording">
+                        <span class="play-icon">▶</span>
+                    </button>
+                    <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
                 </div>
                 <div class="compose-actions is-invisible">
                     <button type="button" class="send-btn" data-action="send"></button>
