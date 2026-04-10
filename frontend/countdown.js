@@ -43,7 +43,11 @@ export function startCountdown({ expiresAt, onPhaseChange, onTick, onExpire }) {
     };
 
     tick();
-    intervalId = window.setInterval(tick, 250);
+    // 1 s cadence is sufficient: minute display holds steady, seconds
+    // display updates each tick. Phase transitions (calm→overtime→
+    // hard-stop) land within 1 s of their true boundary, which is fine
+    // for a 5 min + 2 min window.
+    intervalId = window.setInterval(tick, 1000);
 }
 
 export function stopCountdown() {

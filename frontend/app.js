@@ -9,6 +9,40 @@ import * as copy from "/copy.js";
 let currentState = State.PROBE_404;
 let currentData = {};
 
+// Client-side 3 s countdown before the listen fetch fires. Tapping the
+// active button during the countdown cancels it.
+let listenCountdownInterval = null;
+
+function stopListenCountdown() {
+    if (listenCountdownInterval != null) {
+        window.clearInterval(listenCountdownInterval);
+        listenCountdownInterval = null;
+    }
+    if (currentData) {
+        currentData.countdown = null;
+    }
+}
+
+function startListenCountdown(action) {
+    stopListenCountdown();
+    currentData.countdown = { action, count: 3 };
+    rerender();
+    listenCountdownInterval = window.setInterval(() => {
+        if (currentState !== State.LISTEN_READY || !currentData.countdown) {
+            stopListenCountdown();
+            return;
+        }
+        currentData.countdown.count -= 1;
+        if (currentData.countdown.count <= 0) {
+            const finishAction = currentData.countdown.action;
+            stopListenCountdown();
+            dispatch(Event.LISTEN_TAP, { autoplay: finishAction === "listen" });
+            return;
+        }
+        rerender();
+    }, 1000);
+}
+
 function syncRecordCapabilities() {
     currentData.canRecord = canRecord();
     currentData.recordDisabled = currentData.replyCodeExp ? dynamicRecordCap(Date.now(), currentData.replyCodeExp) <= 0 : false;
@@ -86,6 +120,12 @@ async function dispatch(event, payload = {}) {
         if (result?.event) {
             await dispatch(result.event, result.payload || {});
         } else if (result?.kind === "push") {
+            // Silent: the push subsystem is waiting for an explicit
+            // user gesture (e.g. copy-link click) before prompting.
+            // Don't touch pushState.
+            if (result.silent) {
+                continue;
+            }
             currentData.pushState = "resolved";
             currentData.pushReason = resolvePushReason(result.result);
             if (currentState === State.RALLY_SENT && currentData.pushState === "resolved") {
@@ -95,6 +135,11 @@ async function dispatch(event, payload = {}) {
             }
         }
     }
+}
+
+function setRecordGlow(level) {
+    const btn = document.querySelector(".record-btn");
+    if (btn) btn.style.setProperty("--glow-intensity", String(level));
 }
 
 async function handleRecordToggle() {
@@ -118,6 +163,7 @@ async function handleRecordToggle() {
         currentData.recording = false;
         currentData.recordSeconds = recorded.durationSec;
         currentData.status = "";
+        setRecordGlow(0);
         syncLiveComposer();
         return;
     }
@@ -132,6 +178,9 @@ async function handleRecordToggle() {
                 currentData.status = "";
                 syncLiveComposer();
             },
+            onLevel: (level) => {
+                setRecordGlow(level);
+            },
         });
     } catch (error) {
         if (error instanceof NoMicError || error instanceof PermissionDeniedError) {
@@ -144,22 +193,6 @@ async function handleRecordToggle() {
     }
 }
 
-function installInputHandlers() {
-    document.addEventListener("input", (event) => {
-        const target = event.target;
-        if (!(target instanceof HTMLElement)) {
-            return;
-        }
-        if ((target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.field === "text") {
-            currentData.text = target.value;
-            currentData.status = "";
-            syncLiveComposer();
-        }
-        if ((target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.field === "slug") {
-            currentData.customSlug = target.value.toLowerCase();
-        }
-    });
-}
 
 function installClickHandlers() {
     document.addEventListener("click", async (event) => {
@@ -169,16 +202,34 @@ function installClickHandlers() {
         }
         const { action: name } = action.dataset;
         if (name === "listen") {
-            await dispatch(Event.LISTEN_TAP, {});
+            if (currentData.countdown) {
+                stopListenCountdown();
+                rerender();
+            } else {
+                startListenCountdown("listen");
+            }
+            return;
+        }
+        if (name === "save-later") {
+            if (currentData.countdown) {
+                stopListenCountdown();
+                rerender();
+            } else {
+                startListenCountdown("save");
+            }
             return;
         }
         if (name === "send") {
-            if (!(currentData.text || "").trim() && !currentData.audio) {
+            if (!currentData.audio) {
                 currentData.status = copy.LANDING_STATUS_REQUIRED;
                 syncLiveComposer();
                 return;
             }
             await dispatch(Event.SEND_TAP, {});
+            return;
+        }
+        if (name === "end-rally") {
+            await dispatch(Event.END_RALLY_TAP, {});
             return;
         }
         if (name === "toggle-record") {
@@ -193,6 +244,20 @@ function installClickHandlers() {
             syncLiveComposer();
             return;
         }
+        if (name === "toggle-play") {
+            // Locate the audio element relative to the clicked button
+            // so this handler works for both compose-side previews
+            // (.audio-preview) and listen-side playback (.played-audio).
+            const container = action.closest(".audio-preview, .played-audio");
+            const audioEl = container?.querySelector("audio");
+            if (!audioEl) return;
+            if (audioEl.paused) {
+                try { await audioEl.play(); } catch { /* ignore — user can retry */ }
+            } else {
+                audioEl.pause();
+            }
+            return;
+        }
         if (name === "dismiss") {
             await dispatch(Event.DISMISS, {});
             return;
@@ -202,6 +267,21 @@ function installClickHandlers() {
             currentData.pushReason = copy.COPY_DONE;
             currentData.pushState = "resolved";
             rerender();
+            // Handing off the link is the explicit user gesture that
+            // lets us request push permission. Browsers require a
+            // gesture for requestPermission; the copy click counts.
+            if (
+                typeof Notification !== "undefined" &&
+                Notification.permission === "default" &&
+                currentData.slug
+            ) {
+                const pushResult = await effects.run("push-subscribe", { currentData });
+                if (pushResult?.kind === "push") {
+                    currentData.pushReason = resolvePushReason(pushResult.result);
+                    currentData.pushState = "resolved";
+                    rerender();
+                }
+            }
             return;
         }
         if (name === "share-link" && navigator.share) {
@@ -228,9 +308,6 @@ function installClickHandlers() {
                 rerender();
             }
             return;
-        }
-        if (name === "new-confession") {
-            await dispatch(Event.DISMISS, {});
         }
     });
 }
@@ -261,5 +338,4 @@ function bootstrap() {
 }
 
 bootstrap();
-installInputHandlers();
 installClickHandlers();

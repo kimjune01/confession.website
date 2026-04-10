@@ -1,49 +1,64 @@
-export const LANDING_HEADLINE = "a voice channel for things you can't say in person.";
-export const LANDING_RULES = "one week. burns when heard. audio keeps it going. text ends it.";
+export const LANDING_HEADLINE = "confession";
+export const LANDING_RULES = "for things you can't say in person.\none listen, then gone.";
+
 export const LISTEN_READY_HEADER = "a message is waiting.";
-export const LISTEN_READY_RULES = "listening plays the audio and shows the text once. both burn together.";
+export const LISTEN_READY_RULES = "";
+
 export const LISTEN_LOADING_HEADER = "opening the message.";
 export const LISTEN_LOADING_RULES = "";
+
 export const RALLY_HEADER = "your turn.";
-export const RALLY_RULES = "audio keeps the rally going. text ends the channel.";
-export const REFRESH_RULES = "the fragment still carries the reply code. hurry; the server decides the real deadline.";
+export const RALLY_RULES = "record to return the message.\nor end here.";
+
+export const REFRESH_RULES = "you still have time. hurry.";
+
 export const TERMINAL_LINE = "this channel is done.";
-export const BURN_LOSER_LINE = "someone else listened first. you still saw the turn, but the reply slot is gone.";
+export const BURN_LOSER_LINE = "someone else listened first. the reply slot is gone.";
+
 export const NOTHING_HERE = "nothing here.";
-export const PROBE_LOADING_HEADLINE = "checking the slug.";
-export const PROBE_LOADING_RULES = "pending only. burned, terminated, expired, or absent all collapse here.";
-export const FIRST_SENT_HEADLINE = "the first turn is live.";
-export const FIRST_SENT_RULES = "share the URL directly. no audience, no receipt beyond pull.";
+
+export const PROBE_LOADING_HEADLINE = "opening the link.";
+export const PROBE_LOADING_RULES = "";
+
+export const FIRST_SENT_HEADLINE = "honesty is courage.";
+export const FIRST_SENT_RULES = "hand this link to one person.\nthey will be able to reply.";
+export const FIRST_SENT_NOTE = "";
+
 export const RALLY_SENT_HEADLINE = "sent.";
 export const RALLY_SENT_RULES = "if the other side listens, the next turn replaces this one.";
-export const SEND_AUDIO_LABEL = "send (keeps the rally)";
-export const SEND_TEXT_LABEL = "send (ends the channel)";
-export const SEND_DISABLED_LABEL = "send";
+export const RALLY_SENT_NOTE = "";
+
+export const RALLY_ENDED_HEADLINE = "ended.";
+export const RALLY_ENDED_RULES = "the channel is closed on both sides.";
+
+export const SEND_AUDIO_LABEL = "seal message";
+export const END_HERE_LABEL = "end here";
+
 export const PUSH_PROMPT = "notify you when a new message arrives?";
-export const PUSH_SKIPPED = "push stays optional and local to this browser.";
-export const PUSH_GRANTED = "push set on this browser.";
-export const PUSH_DENIED = "no reminder will be sent.";
-export const PUSH_UNSUPPORTED = "push is not available here.";
+export const PUSH_SKIPPED = "push skipped.";
+export const PUSH_GRANTED = "notifications on for this browser.";
+export const PUSH_DENIED = "no notifications.";
+export const PUSH_UNSUPPORTED = "push not available here.";
+
 export const LOADING_TEXT = "loading...";
 export const LISTEN_BUTTON = "listen";
 export const COPY_DONE = "copied.";
-export const LANDING_STATUS_REQUIRED = "record audio, write text, or do both.";
-export const LANDING_STATUS_RECORDING_UNAVAILABLE = "microphone unavailable. text still works.";
-// Caption shown under the record button BEFORE recording starts.
-export const RECORD_CAPTION_READY = "tap to record. audio keeps the rally going.";
-// Caption shown under the record button WHILE recording.
-export const RECORD_CAPTION_RECORDING = "recording — tap to stop.";
-// Legacy name kept for any lingering refs; points at the ready caption
-// so the surface never says "record again" before a recording exists.
-export const LANDING_STATUS_RECORDING = RECORD_CAPTION_READY;
-export const LANDING_STATUS_SENDING = "sending...";
+
+export const LANDING_STATUS_REQUIRED = "record something first.";
+export const LANDING_STATUS_RECORDING_UNAVAILABLE = "microphone unavailable. try a different browser.";
+export const LANDING_STATUS_SENDING = "sealing...";
+
+
 export const RALLY_STATUS_EXPIRED = "the reply window closed.";
-export const RALLY_STATUS_UNKNOWN = "turn lost. the write may still have landed.";
-export const RALLY_STATUS_REJECTED = "reply code spent or expired.";
-export const RALLY_STATUS_REFRESH = "refresh kept the reply code but not the exact timer.";
-export const FIRST_SENT_NOTE = "push only matters for audio-bearing turns.";
-export const RALLY_SENT_NOTE = "a short confirmation only. no new share surface.";
-export const RECORD_CAP_PREFIX = "record cap";
-export const RECORD_LABEL_READY = "record";
-export const RECORD_LABEL_STOP = "stop";
-export const CUSTOM_SLUG_HINT = "3-32 chars: a-z, 0-9, hyphen";
+export const RALLY_STATUS_UNKNOWN = "connection dropped. your reply may have gone through.";
+export const RALLY_STATUS_REJECTED = "this reply window is already closed.";
+export const RALLY_STATUS_REFRESH = "you still have time. hurry.";
+
+// Caption shown under the record button BEFORE recording starts.
+export const RECORD_CAPTION_READY = "";
+// Caption shown under the record button WHILE recording.
+export const RECORD_CAPTION_RECORDING = "";
+
+// Share-card inline warning: reinforces the mechanic without using "burn"
+// before the sender has seen the behavior themselves.
+export const SHARE_CARD_NOTE = "whoever opens it hears it once. then it's gone.";

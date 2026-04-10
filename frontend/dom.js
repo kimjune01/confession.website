@@ -17,20 +17,21 @@ function formatSeconds(seconds) {
 }
 
 function formatRemaining(remainingMs) {
-    if (remainingMs == null) {
-        return "hurry";
+    // Refresh-degraded (null) — the rules line already says "hurry",
+    // so leave the countdown surface empty rather than duplicating.
+    if (remainingMs == null) return "";
+    if (remainingMs <= 0) return "";
+    // Minute resolution (ceil) until the final minute; then seconds.
+    // "5 minutes left" holds from 5:00 down to 4:00 exclusive, "4" from
+    // 4:00 down to 3:00, etc. The user-facing window opens at 5 minutes;
+    // the 2-minute server grace is internal, so clamp the displayed
+    // minutes at 5 so the timer never appears to count 7 → 6 → 5.
+    if (remainingMs >= 60000) {
+        const minutes = Math.min(5, Math.ceil(remainingMs / 60000));
+        return `${minutes} minute${minutes === 1 ? "" : "s"} left`;
     }
-    return formatSeconds(Math.ceil(remainingMs / 1000));
-}
-
-function sendLabel(text, audio) {
-    if (audio) {
-        return copy.SEND_AUDIO_LABEL;
-    }
-    if ((text || "").trim()) {
-        return copy.SEND_TEXT_LABEL;
-    }
-    return copy.SEND_DISABLED_LABEL;
+    const seconds = Math.ceil(remainingMs / 1000);
+    return `${seconds} second${seconds === 1 ? "" : "s"} left`;
 }
 
 function appendCompose(target, props) {
@@ -39,19 +40,24 @@ function appendCompose(target, props) {
     const countdown = compose.querySelector(".countdown-card");
     const phase = compose.querySelector(".countdown-phase");
     const time = compose.querySelector(".countdown-time");
+    const recordStack = compose.querySelector(".record-stack");
     const recordBtn = compose.querySelector(".record-btn");
     const recordTime = compose.querySelector(".record-time");
     const recordCaption = compose.querySelector(".record-caption");
     const audioPreview = compose.querySelector(".audio-preview");
     const previewAudio = audioPreview.querySelector("audio");
-    const text = compose.querySelector(".compose-text");
+    const composeActions = compose.querySelector(".compose-actions");
     const sendBtn = compose.querySelector(".send-btn");
-    const disclosure = compose.querySelector(".slug-disclosure");
-    const slugInput = compose.querySelector(".slug-input");
+    const rallyEnd = compose.querySelector(".rally-end");
+    const endBtn = rallyEnd.querySelector('[data-action="end-rally"]');
 
-    text.value = props.text || "";
-    sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : sendLabel(props.text, props.audio);
-    sendBtn.disabled = props.sending || (!(props.text || "").trim() && !props.audio);
+    const hasAudio = Boolean(props.audio?.url);
+    const canEnd = Boolean(props.canEnd);
+
+    sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : copy.SEND_AUDIO_LABEL;
+    sendBtn.disabled = props.sending || !hasAudio;
+    endBtn.textContent = copy.END_HERE_LABEL;
+    endBtn.disabled = Boolean(props.sending);
 
     if (props.status) {
         status.hidden = false;
@@ -70,22 +76,46 @@ function appendCompose(target, props) {
         }
     }
 
+    // Step reveal: record stack is the initial control; once audio is
+    // captured, it gives way to the preview + send actions. On rally
+    // states, "end here" sits alongside the record button as a
+    // terminator alternative — hidden mid-record and after audio is
+    // captured, since both commit the user to an audio-bearing send.
+    recordStack.hidden = hasAudio;
+    audioPreview.hidden = !hasAudio;
+    composeActions.hidden = !hasAudio;
+    rallyEnd.hidden = !canEnd || hasAudio || Boolean(props.recording);
+
     recordBtn.classList.toggle("is-recording", Boolean(props.recording));
     recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
-    recordTime.hidden = !props.recording;
+    // Keep .record-time in the layout flow with visibility (not [hidden])
+    // so starting a recording doesn't push sibling content down.
     recordTime.textContent = formatSeconds(props.recordSeconds || 0);
+    recordTime.style.visibility = props.recording ? "visible" : "hidden";
     recordCaption.textContent = props.recordCaption || "";
+    recordCaption.hidden = !props.recordCaption;
 
-    if (props.audio?.url) {
-        audioPreview.hidden = false;
+    if (hasAudio) {
         previewAudio.src = props.audio.url;
     }
 
-    if (props.hideSlug) {
-        disclosure.hidden = true;
-    } else {
-        slugInput.value = props.customSlug || "";
-    }
+    // Custom play button — native <audio> is hidden, we toggle its
+    // play/pause on the dedicated button and mirror the state into
+    // the glyph via these listeners.
+    const playBtn = compose.querySelector(".play-btn");
+    const playIcon = playBtn.querySelector(".play-icon");
+    previewAudio.addEventListener("play", () => {
+        playBtn.classList.add("is-playing");
+        playIcon.textContent = "⏸";
+    });
+    previewAudio.addEventListener("pause", () => {
+        playBtn.classList.remove("is-playing");
+        playIcon.textContent = "▶";
+    });
+    previewAudio.addEventListener("ended", () => {
+        playBtn.classList.remove("is-playing");
+        playIcon.textContent = "▶";
+    });
 
     target.append(compose);
 }
@@ -93,8 +123,30 @@ function appendCompose(target, props) {
 function appendContent(target, content) {
     const node = cloneTemplate("tpl-content");
     if (content?.audioUrl) {
-        node.querySelector(".played-audio").hidden = false;
-        node.querySelector("audio").src = content.audioUrl;
+        const played = node.querySelector(".played-audio");
+        const audioEl = played.querySelector("audio");
+        const playBtn = played.querySelector(".play-btn");
+        const playIcon = playBtn.querySelector(".play-icon");
+        played.hidden = false;
+        if (content.autoplay) {
+            audioEl.autoplay = true;
+            // One-shot: if the state re-renders for any reason
+            // (e.g. send rejected), don't restart playback.
+            content.autoplay = false;
+        }
+        audioEl.src = content.audioUrl;
+        audioEl.addEventListener("play", () => {
+            playBtn.classList.add("is-playing");
+            playIcon.textContent = "⏸";
+        });
+        audioEl.addEventListener("pause", () => {
+            playBtn.classList.remove("is-playing");
+            playIcon.textContent = "▶";
+        });
+        audioEl.addEventListener("ended", () => {
+            playBtn.classList.remove("is-playing");
+            playIcon.textContent = "▶";
+        });
     }
     if (content?.text) {
         const p = node.querySelector(".message-text");
@@ -128,7 +180,6 @@ export function render_landing(props = {}) {
     appendCompose(frame.querySelector(".surface-body"), {
         ...props,
         phase: null,
-        hideSlug: false,
         recordCaption: !props.canRecord
             ? copy.LANDING_STATUS_RECORDING_UNAVAILABLE
             : props.recording
@@ -149,13 +200,15 @@ export function render_first_sent(props = {}) {
     return frame;
 }
 
-export function render_probe_loading(props = {}) {
-    const frame = brandFrame(copy.PROBE_LOADING_HEADLINE, copy.PROBE_LOADING_RULES);
-    const body = frame.querySelector(".surface-body");
-    const note = cloneTemplate("tpl-empty");
-    note.querySelector(".inline-note").textContent = props.slug || copy.LOADING_TEXT;
-    note.querySelector('[data-action="dismiss"]').hidden = true;
-    body.append(note);
+export function render_probe_loading() {
+    // Show the same UI as LISTEN_READY but with all buttons disabled.
+    // Probe fetch resolves in ~200 ms and the only visible change on
+    // transition is the buttons becoming enabled — continuity instead
+    // of an interstitial.
+    const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
+    const card = cloneTemplate("tpl-listen-ready");
+    card.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+    frame.querySelector(".surface-body").append(card);
     return frame;
 }
 
@@ -166,17 +219,35 @@ export function render_probe_404() {
     return frame;
 }
 
-export function render_listen_ready() {
+export function render_listen_ready(props = {}) {
     const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
-    frame.querySelector(".surface-body").append(cloneTemplate("tpl-listen-ready"));
+    const card = cloneTemplate("tpl-listen-ready");
+    const listenBtn = card.querySelector('[data-action="listen"]');
+    const saveBtn = card.querySelector('[data-action="save-later"]');
+    // During a countdown, the tapped button displays the remaining
+    // seconds as its label and the other is hidden. Tapping again
+    // cancels (handled in app.js).
+    if (props.countdown) {
+        const { action, count } = props.countdown;
+        if (action === "save") {
+            saveBtn.textContent = String(count);
+            listenBtn.hidden = true;
+        } else {
+            listenBtn.textContent = String(count);
+            saveBtn.hidden = true;
+        }
+    }
+    frame.querySelector(".surface-body").append(card);
     return frame;
 }
 
 export function render_listen_loading() {
-    const frame = brandFrame(copy.LISTEN_LOADING_HEADER, copy.LISTEN_LOADING_RULES);
-    const card = cloneTemplate("tpl-empty");
-    card.querySelector(".inline-note").textContent = copy.LOADING_TEXT;
-    card.querySelector('[data-action="dismiss"]').hidden = true;
+    // Same continuity trick as render_probe_loading — hold the listen
+    // surface with a disabled button while the fetch resolves.
+    const frame = brandFrame(copy.LISTEN_READY_HEADER, copy.LISTEN_READY_RULES);
+    const card = cloneTemplate("tpl-listen-ready");
+    const btn = card.querySelector('[data-action="listen"]');
+    if (btn) btn.disabled = true;
     frame.querySelector(".surface-body").append(card);
     return frame;
 }
@@ -187,7 +258,7 @@ export function render_post_listen_rally(props = {}) {
     appendContent(body, props.content);
     appendCompose(body, {
         ...props,
-        hideSlug: true,
+        canEnd: true,
         recordCaption: !props.canRecord
             ? copy.LANDING_STATUS_RECORDING_UNAVAILABLE
             : props.recording
@@ -202,8 +273,8 @@ export function render_post_listen_rally_refresh(props = {}) {
     const body = frame.querySelector(".surface-body");
     appendCompose(body, {
         ...props,
-        hideSlug: true,
-        recordCaption: props.canRecord ? copy.RALLY_STATUS_REFRESH : copy.LANDING_STATUS_RECORDING_UNAVAILABLE,
+        canEnd: true,
+        recordCaption: props.canRecord ? "" : copy.LANDING_STATUS_RECORDING_UNAVAILABLE,
     });
     return frame;
 }
@@ -229,10 +300,20 @@ export function render_post_listen_burn_loser(props = {}) {
 }
 
 export function render_rally_sent(props = {}) {
-    const frame = brandFrame(copy.RALLY_SENT_HEADLINE, copy.RALLY_SENT_RULES);
+    const headline = props.ended ? copy.RALLY_ENDED_HEADLINE : copy.RALLY_SENT_HEADLINE;
+    const rules = props.ended ? copy.RALLY_ENDED_RULES : copy.RALLY_SENT_RULES;
+    const frame = brandFrame(headline, rules);
     const card = cloneTemplate("tpl-rally-sent");
-    card.querySelector(".inline-note").textContent = copy.RALLY_SENT_NOTE;
-    renderPushPrompt(card, props);
+    const note = card.querySelector(".inline-note");
+    note.textContent = props.ended ? "" : copy.RALLY_SENT_NOTE;
+    note.hidden = !note.textContent;
+    // An ended channel doesn't accept further pushes — skip the prompt.
+    if (!props.ended) {
+        renderPushPrompt(card, props);
+    } else {
+        const prompt = card.querySelector(".push-prompt");
+        if (prompt) prompt.hidden = true;
+    }
     frame.querySelector(".surface-body").append(card);
     return frame;
 }
@@ -269,14 +350,16 @@ export function syncComposer(props = {}) {
     const countdown = compose.querySelector(".countdown-card");
     const phase = compose.querySelector(".countdown-phase");
     const time = compose.querySelector(".countdown-time");
+    const recordStack = compose.querySelector(".record-stack");
     const recordBtn = compose.querySelector(".record-btn");
     const recordTime = compose.querySelector(".record-time");
     const recordCaption = compose.querySelector(".record-caption");
     const audioPreview = compose.querySelector(".audio-preview");
     const previewAudio = audioPreview?.querySelector("audio");
-    const text = compose.querySelector(".compose-text");
+    const composeActions = compose.querySelector(".compose-actions");
     const sendBtn = compose.querySelector(".send-btn");
-    const slugInput = compose.querySelector(".slug-input");
+
+    const hasAudio = Boolean(props.audio?.url);
 
     if (status) {
         status.hidden = !props.status;
@@ -291,45 +374,55 @@ export function syncComposer(props = {}) {
         compose.classList.toggle("is-refresh", props.phase === "refresh-degraded");
     }
 
+    if (recordStack) {
+        recordStack.hidden = hasAudio;
+    }
+
     if (recordBtn) {
         recordBtn.classList.toggle("is-recording", Boolean(props.recording));
         recordBtn.disabled = props.sending || !props.canRecord || props.recordDisabled;
     }
 
     if (recordTime) {
-        recordTime.hidden = !props.recording;
         recordTime.textContent = formatSeconds(props.recordSeconds || 0);
+        recordTime.style.visibility = props.recording ? "visible" : "hidden";
     }
 
     if (recordCaption) {
         recordCaption.textContent = props.recordCaption || "";
+        recordCaption.hidden = !props.recordCaption;
+    }
+
+    const rallyEnd = compose.querySelector(".rally-end");
+    if (rallyEnd) {
+        const canEnd = Boolean(props.canEnd);
+        rallyEnd.hidden = !canEnd || Boolean(props.audio?.url) || Boolean(props.recording);
+        const endBtn = rallyEnd.querySelector('[data-action="end-rally"]');
+        if (endBtn) {
+            endBtn.disabled = Boolean(props.sending);
+        }
     }
 
     if (previewAudio && audioPreview) {
-        if (props.audio?.url) {
+        if (hasAudio) {
             audioPreview.hidden = false;
             if (previewAudio.src !== props.audio.url) {
                 previewAudio.src = props.audio.url;
             }
         } else {
             audioPreview.hidden = true;
+            previewAudio.pause();
             previewAudio.removeAttribute("src");
         }
     }
 
-    if (text) {
-        if (document.activeElement !== text) {
-            text.value = props.text || "";
-        }
-    }
-
-    if (slugInput && document.activeElement !== slugInput) {
-        slugInput.value = props.customSlug || "";
+    if (composeActions) {
+        composeActions.hidden = !hasAudio;
     }
 
     if (sendBtn) {
-        sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : sendLabel(props.text, props.audio);
-        sendBtn.disabled = props.sending || (!(props.text || "").trim() && !props.audio);
+        sendBtn.textContent = props.sending ? copy.LANDING_STATUS_SENDING : copy.SEND_AUDIO_LABEL;
+        sendBtn.disabled = props.sending || !hasAudio;
     }
 }
 

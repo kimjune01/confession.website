@@ -33,6 +33,7 @@ const effectHandlers = {
     },
     "fetch-listen": async (payload) => {
         const slug = payload.slug || payload.currentData?.slug || "";
+        const autoplay = Boolean(payload.autoplay || payload.currentData?.autoplay);
         const result = await api.listen(slug);
         if (!result.ok) {
             return { event: "LISTEN_404", payload: { slug } };
@@ -40,7 +41,7 @@ const effectHandlers = {
         const data = result.data;
         const base = {
             slug,
-            content: buildContent(data),
+            content: { ...buildContent(data), autoplay },
         };
         if (data.terminated) {
             return { event: "LISTEN_200_TERMINAL", payload: base };
@@ -58,14 +59,12 @@ const effectHandlers = {
         return { event: "LISTEN_200_BURN_LOSER", payload: base };
     },
     "fetch-first-compose": async (payload) => {
-        const text = (payload.currentData?.text || "").trim();
-        const slug = (payload.currentData?.customSlug || "").trim();
         const audioPayload = payload.currentData?.audio
             ? { b64: await audio.toBase64(payload.currentData.audio.blob), mime: payload.currentData.audio.mime }
             : undefined;
         const result = await api.compose({
-            text,
-            slug,
+            text: "",
+            slug: "",
             audio: audioPayload,
         });
         if (result.ok) {
@@ -95,14 +94,58 @@ const effectHandlers = {
             payload: { currentData: payload.currentData, status },
         };
     },
+    "fetch-rally-end": async (payload) => {
+        // Text-as-terminator: send a non-empty text field with no audio.
+        // Per SPEC, text-only compose on a rally turn terminates the
+        // channel. The literal content is never seen — the sender just
+        // observes the channel collapse — so a single-character marker
+        // is enough and stays below the 280-char cap.
+        const result = await api.rallyCompose(payload.currentData.slug, {
+            reply_code: payload.currentData.replyCode,
+            text: "·",
+            audio: undefined,
+        });
+        if (result.ok) {
+            return {
+                event: "SEND_OK",
+                payload: {
+                    slug: payload.currentData.slug,
+                    replyable: false,
+                    ended: true,
+                },
+            };
+        }
+        if (result.reason === "network") {
+            return {
+                event: "SEND_UNKNOWN",
+                payload: {
+                    currentData: payload.currentData,
+                    status: "connection dropped. your reply may have gone through.",
+                },
+            };
+        }
+        if (result.status === 404) {
+            return {
+                event: "SEND_STALE",
+                payload: { currentData: payload.currentData },
+            };
+        }
+        let status = result.data?.error || "send rejected.";
+        if (result.status === 400) {
+            status = result.data?.error || "couldn't end the channel.";
+        }
+        return {
+            event: "SEND_REJECTED",
+            payload: { currentData: payload.currentData, status },
+        };
+    },
     "fetch-rally-compose": async (payload) => {
-        const text = (payload.currentData?.text || "").trim();
         const audioPayload = payload.currentData?.audio
             ? { b64: await audio.toBase64(payload.currentData.audio.blob), mime: payload.currentData.audio.mime }
             : undefined;
         const result = await api.rallyCompose(payload.currentData.slug, {
             reply_code: payload.currentData.replyCode,
-            text,
+            text: "",
             audio: audioPayload,
         });
         if (result.ok) {
@@ -166,8 +209,12 @@ const effectHandlers = {
     },
     "inspect-push": async (payload) => {
         const result = await push.inspectSubscription(payload.currentData?.slug || payload.slug, payload.currentData?.replyable ?? payload.replyable);
+        // Prompt state is surfaced explicitly on the copy-link click,
+        // not auto-prompted after seal. Everything else (already
+        // subscribed, silently auto-subscribed on grant, unsupported,
+        // denied) flows through the normal push result path.
         if (result.ok && result.reason === "prompt") {
-            return { event: "PUSH_PROMPT_READY", payload: { currentData: payload.currentData } };
+            return { kind: "push", silent: true };
         }
         return { kind: "push", result };
     },

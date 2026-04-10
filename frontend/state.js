@@ -24,6 +24,9 @@ export const Event = {
     LISTEN_200_TERMINAL: "LISTEN_200_TERMINAL",
     LISTEN_404: "LISTEN_404",
     SEND_TAP: "SEND_TAP",
+    // Recipient chose to terminate the channel with text (no audio).
+    // Sent from POST_LISTEN_RALLY / POST_LISTEN_RALLY_REFRESH only.
+    END_RALLY_TAP: "END_RALLY_TAP",
     SEND_OK: "SEND_OK",
     // Content rejection (400, 409 for user-supplied slug). Draft stays
     // alive; surface a status message and let the user retry.
@@ -57,8 +60,6 @@ function withDraft(payload, extras = {}) {
 function freshComposeData(payload = {}) {
     return {
         slug: payload.slug || "",
-        text: "",
-        customSlug: "",
         audio: null,
         sending: false,
         status: "",
@@ -92,7 +93,6 @@ export function transition(current, event, payload = {}) {
                     replyCodeExp: null,
                     phase: "refresh-degraded",
                     remainingMs: null,
-                    text: "",
                     audio: null,
                     sending: false,
                     status: payload.status || "",
@@ -117,7 +117,10 @@ export function transition(current, event, payload = {}) {
             return {
                 next: State.LISTEN_LOADING,
                 effects: ["fetch-listen"],
-                data: { slug: payload.slug || payload.currentData?.slug || "" },
+                data: {
+                    slug: payload.slug || payload.currentData?.slug || "",
+                    autoplay: Boolean(payload.autoplay),
+                },
             };
         case Event.LISTEN_200_RALLY:
             if (current !== State.LISTEN_LOADING) invalid(current, event);
@@ -131,7 +134,6 @@ export function transition(current, event, payload = {}) {
                     replyCodeExp: payload.replyCodeExp,
                     phase: "calm",
                     remainingMs: null,
-                    text: "",
                     audio: null,
                     sending: false,
                     status: "",
@@ -171,6 +173,16 @@ export function transition(current, event, payload = {}) {
             }
             invalid(current, event);
             break;
+        case Event.END_RALLY_TAP:
+            if (current === State.POST_LISTEN_RALLY || current === State.POST_LISTEN_RALLY_REFRESH) {
+                return {
+                    next: current,
+                    effects: ["fetch-rally-end"],
+                    data: withDraft(payload, { sending: true, ending: true, status: "" }),
+                };
+            }
+            invalid(current, event);
+            break;
         case Event.SEND_OK:
             if (current === State.LANDING) {
                 return {
@@ -192,6 +204,7 @@ export function transition(current, event, payload = {}) {
                     data: {
                         slug: payload.slug,
                         replyable: payload.replyable,
+                        ended: Boolean(payload.ended || payload.currentData?.ending),
                         pushState: "checking",
                         pushReason: "",
                     },
@@ -318,7 +331,6 @@ export function initialState(pathname, hash) {
                 replyCodeExp: null,
                 phase: "refresh-degraded",
                 remainingMs: null,
-                text: "",
                 audio: null,
                 sending: false,
                 status: "",

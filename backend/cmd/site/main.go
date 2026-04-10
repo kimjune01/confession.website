@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"path"
 	"strings"
 
@@ -17,15 +18,18 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
-//go:embed static/*
+//go:embed static
 var static embed.FS
 
 var contentTypes = map[string]string{
-	".html": "text/html; charset=utf-8",
-	".css":  "text/css; charset=utf-8",
-	".js":   "application/javascript; charset=utf-8",
-	".json": "application/json; charset=utf-8",
-	".svg":  "image/svg+xml",
+	".html":  "text/html; charset=utf-8",
+	".css":   "text/css; charset=utf-8",
+	".js":    "application/javascript; charset=utf-8",
+	".json":  "application/json; charset=utf-8",
+	".svg":   "image/svg+xml",
+	".woff2": "font/woff2",
+	".woff":  "font/woff",
+	".txt":   "text/plain; charset=utf-8",
 }
 
 func handler(_ context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -56,12 +60,22 @@ func serve(filename string) (events.APIGatewayV2HTTPResponse, error) {
 	}
 
 	// HTML stays no-cache so updates flow immediately. Static assets
-	// (css, js) cache for an hour. The service worker is special:
-	// browsers re-fetch sw.js on every page load if Cache-Control
-	// allows, so keep it no-cache to ensure updates take effect.
+	// (css, js, fonts) cache for a minute. The service worker is
+	// special: browsers re-fetch sw.js on every page load if
+	// Cache-Control allows, so keep it no-cache to ensure updates
+	// take effect.
 	cacheControl := "no-cache"
 	if ext != ".html" && !strings.HasSuffix(filename, "/sw.js") {
-		cacheControl = "public, max-age=3600"
+		cacheControl = "public, max-age=60"
+	}
+
+	// Binary assets (fonts, images) must be base64-encoded so API
+	// Gateway's JSON envelope doesn't mangle non-UTF8 bytes.
+	body := string(data)
+	isBase64 := false
+	if ext == ".woff2" || ext == ".woff" || ext == ".ttf" || ext == ".otf" {
+		body = base64.StdEncoding.EncodeToString(data)
+		isBase64 = true
 	}
 
 	return events.APIGatewayV2HTTPResponse{
@@ -70,7 +84,8 @@ func serve(filename string) (events.APIGatewayV2HTTPResponse, error) {
 			"Content-Type":  ct,
 			"Cache-Control": cacheControl,
 		},
-		Body: string(data),
+		Body:            body,
+		IsBase64Encoded: isBase64,
 	}, nil
 }
 

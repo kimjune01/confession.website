@@ -1,8 +1,6 @@
 # Build artifacts
 backend/dist/
-backend/cmd/site/static/*.html
-backend/cmd/site/static/*.css
-backend/cmd/site/static/*.js
+backend/cmd/site/static/
 *.zip
 
 # Pulumi

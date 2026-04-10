@@ -10,6 +10,41 @@ let stopPromise = null;
 let stopResolve = null;
 let state = "idle";
 let fakeBlob = null;
+let audioContext = null;
+let analyser = null;
+let levelRAF = null;
+
+function startLevelLoop(onLevel) {
+    if (!analyser) return;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+        if (!analyser) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        const avg = sum / dataArray.length;
+        // Normalize to 0-1 against a softly-spoken reference; clamp at 1.
+        const level = Math.min(avg / 80, 1);
+        onLevel(level);
+        levelRAF = requestAnimationFrame(tick);
+    };
+    tick();
+}
+
+function stopLevelLoop() {
+    if (levelRAF != null) {
+        cancelAnimationFrame(levelRAF);
+        levelRAF = null;
+    }
+    if (analyser) {
+        try { analyser.disconnect(); } catch {}
+        analyser = null;
+    }
+    if (audioContext) {
+        try { audioContext.close(); } catch {}
+        audioContext = null;
+    }
+}
 
 // Dev-only side door: tests running against localhost can bypass
 // MediaRecorder by setting `window.__confessionFakeAudio` before
@@ -76,6 +111,7 @@ function cleanupInterval() {
 }
 
 function cleanupTracks() {
+    stopLevelLoop();
     if (mediaStream) {
         mediaStream.getTracks().forEach((track) => track.stop());
     }
@@ -100,6 +136,27 @@ export async function startRecording(opts = {}) {
             throw new PermissionDeniedError("Microphone denied");
         }
         throw error;
+    }
+
+    // Voice-activity glow: mirror the mic level back to the caller so
+    // the record button can pulse while the user is speaking. Optional
+    // — falls through silently if the Web Audio API is unavailable or
+    // the context can't start.
+    try {
+        const Ctor = window.AudioContext || window.webkitAudioContext;
+        if (Ctor && opts.onLevel) {
+            audioContext = new Ctor();
+            if (audioContext.state === "suspended") {
+                await audioContext.resume();
+            }
+            const source = audioContext.createMediaStreamSource(mediaStream);
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            startLevelLoop(opts.onLevel);
+        }
+    } catch {
+        stopLevelLoop();
     }
 
     chunks = [];

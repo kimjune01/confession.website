@@ -14,41 +14,41 @@
     <template id="tpl-frame">
         <section class="surface fade-in">
             <header class="brand-block">
-                <p class="brand-mark">confession.website</p>
                 <h1 class="headline"></h1>
                 <p class="rules"></p>
             </header>
             <div class="surface-body"></div>
-            <footer class="footer-note">no audience. no masking. the rules stay visible.</footer>
         </section>
     </template>
 
     <template id="tpl-compose">
         <section class="compose-card">
+            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
             <div class="compose-status" hidden></div>
             <div class="countdown-card" hidden>
                 <p class="countdown-phase"></p>
                 <p class="countdown-time"></p>
             </div>
             <div class="record-stack">
-                <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
-                    <span class="record-icon"></span>
-                </button>
-                <p class="record-time" hidden>0:00</p>
+                <div class="record-row">
+                    <button class="record-btn" type="button" data-action="toggle-record" aria-label="Record">
+                        <span class="record-icon"></span>
+                    </button>
+                    <div class="rally-end" hidden>
+                        <button type="button" class="ghost-btn" data-action="end-rally">end here</button>
+                    </div>
+                </div>
+                <p class="record-time">0:00</p>
                 <p class="record-caption"></p>
             </div>
             <div class="audio-preview" hidden>
-                <audio controls preload="metadata"></audio>
-                <button type="button" class="ghost-btn" data-action="clear-audio">remove audio</button>
+                <audio preload="metadata"></audio>
+                <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play recording">
+                    <span class="play-icon">▶</span>
+                </button>
+                <button type="button" class="ghost-btn" data-action="clear-audio">record again</button>
             </div>
-            <label class="field-label" for="compose-text">or type</label>
-            <textarea id="compose-text" class="compose-text" rows="6" maxlength="280" data-field="text"></textarea>
-            <details class="slug-disclosure">
-                <summary>customize URL</summary>
-                <label class="field-label" for="compose-slug">slug</label>
-                <input id="compose-slug" class="slug-input" type="text" maxlength="32" autocomplete="off" spellcheck="false" data-field="slug">
-            </details>
-            <div class="compose-actions">
+            <div class="compose-actions" hidden>
                 <button type="button" class="send-btn" data-action="send"></button>
             </div>
         </section>
@@ -56,14 +56,20 @@
 
     <template id="tpl-listen-ready">
         <section class="notice-card">
-            <button type="button" class="send-btn" data-action="listen">listen</button>
+            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
+            <button type="button" class="send-btn" data-action="listen">listen just once</button>
+            <button type="button" class="ghost-btn" data-action="save-later">save for later</button>
         </section>
     </template>
 
     <template id="tpl-content">
         <section class="content-card">
+            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
             <div class="played-audio" hidden>
-                <audio controls preload="metadata"></audio>
+                <audio preload="metadata"></audio>
+                <button type="button" class="play-btn" data-action="toggle-play" aria-label="Play message">
+                    <span class="play-icon">▶</span>
+                </button>
             </div>
             <p class="message-text" hidden></p>
         </section>
@@ -71,13 +77,12 @@
 
     <template id="tpl-link-card">
         <section class="link-card">
-            <p class="result-label">share this URL</p>
             <input class="link-out" type="text" readonly>
             <div class="link-actions">
                 <button type="button" class="send-btn compact" data-action="copy-link">copy</button>
                 <button type="button" class="ghost-btn compact" data-action="share-link">share</button>
             </div>
-            <p class="inline-note">the URL is the credential. if it is heard, the pending turn burns.</p>
+            <p class="inline-note">check the link yourself to see if it's been heard.</p>
             <div class="push-prompt" hidden>
                 <p class="push-copy"></p>
                 <div class="push-actions">
@@ -85,14 +90,12 @@
                     <button type="button" class="ghost-btn compact" data-action="push-no">no</button>
                 </div>
             </div>
-            <div class="compose-actions">
-                <button type="button" class="ghost-btn" data-action="new-confession">start again</button>
-            </div>
         </section>
     </template>
 
     <template id="tpl-rally-sent">
         <section class="notice-card">
+            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
             <p class="sent-tick">tick.</p>
             <p class="inline-note"></p>
             <div class="push-prompt" hidden>
@@ -107,6 +110,7 @@
 
     <template id="tpl-empty">
         <section class="notice-card">
+            <div class="divider" aria-hidden="true"><span class="divider-end">❯</span><span class="divider-line"></span><span class="divider-end">❮</span></div>
             <p class="inline-note"></p>
             <div class="compose-actions">
                 <button type="button" class="ghost-btn" data-action="dismiss">dismiss</button>

@@ -1,9 +1,33 @@
-/* Palette, type, and visual language copied from
- * ../ephemeral.website/frontend/style.css. Class names keep
- * confession's surface vocabulary; only the visual primitives
- * are ported. */
+/* Dark academia rework, 2026-04-09.
+ * Typographic choices follow Matthew Butterick's Practical Typography:
+ * serif body, generous leading, small caps in place of all-caps,
+ * restrained emphasis, one accent color. Class names kept for JS stability. */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap');
+/* Charter (Bitstream license, see /fonts/Charter license.txt) — flavor
+ * accent on the headline only. IBM Plex Sans (SIL OFL, Mike Abbink +
+ * Bold Monday for IBM, 2017) — body copy and all UI chrome. Latin-1
+ * subset only, since this app is English-only. */
+@font-face {
+    font-family: 'Charter';
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/charter_italic.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/IBMPlexSans-Regular-Latin1.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Sans';
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/fonts/IBMPlexSans-Italic-Latin1.woff2') format('woff2');
+}
 
 * {
     margin: 0;
@@ -11,14 +35,43 @@
     box-sizing: border-box;
 }
 
+:root {
+    /* midnight ink, parchment, brass */
+    --ink-0: #00010a;          /* deepest well */
+    --ink-1: #02040f;          /* page ground */
+    --ink-2: #070c1e;          /* raised card */
+    --rule: #172038;           /* hairline border */
+    --rule-strong: #26324f;    /* hover border */
+    --parchment: #e7ddc7;      /* body text */
+    --parchment-dim: #b6aa8e;  /* secondary */
+    --muted: #7a7058;          /* tertiary / labels */
+    --brass: #c9a44c;          /* accent */
+    --brass-bright: #d8b25a;   /* accent hover */
+    --brass-dim: #8e7434;      /* accent at rest */
+    --crimson: #b03a3a;        /* record dot, errors */
+    --ember: #d66a3a;          /* overtime warning */
+}
+
 html {
-    background: #0a0a0a;
+    background-color: var(--ink-1);
 }
 
 body {
-    font-family: 'Space Mono', monospace;
-    background: #0a0a0a;
-    color: #e0e0e0;
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+    background-color: var(--ink-1);
+    /* Two layers painted over the ink:
+     *   1. Fleuron dingbats (❦) at the diagonal cells of a 2×2 checker,
+     *      so the marks trace a continuous diagonal drift across the page.
+     *   2. Warm parchment-tinted fractal noise for paper grain.
+     * Both are inline SVG data URIs — no extra assets to ship. */
+    background-image:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><g font-family='Georgia,serif' font-size='30' fill='%23c9a44c' fill-opacity='0.13' text-anchor='middle'><text x='60' y='76'>&#10086;</text><text x='180' y='196'>&#10086;</text></g></svg>"),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.78  0 0 0 0 0.58  0 0 0 0.09 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-repeat: repeat, repeat;
+    background-size: 240px 240px, 200px 200px;
+    color: var(--parchment);
     min-height: 100vh;
     min-height: 100dvh;
     display: flex;
@@ -26,6 +79,9 @@ body {
     align-items: center;
     overflow-x: hidden;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "kern", "liga";
 }
 
 button,
@@ -49,8 +105,8 @@ input {
 
 .app {
     width: 100%;
-    max-width: 480px;
-    padding: 2rem;
+    max-width: 560px;
+    padding: 3.5rem 2rem;
     text-align: center;
 }
 
@@ -60,72 +116,73 @@ input {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 1.5rem;
-    animation: reveal 0.4s ease-out forwards;
+    gap: 3rem;
+    animation: reveal 0.28s ease-out forwards;
 }
 
 .brand-block {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
-}
-
-.brand-mark {
-    color: #666;
-    font-size: 0.65rem;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
+    gap: 1.5rem;
+    padding-bottom: 0.5rem;
 }
 
 .headline {
-    font-family: 'Space Mono', monospace;
-    font-size: 2.4rem;
+    font-family: 'Charter', Georgia, Cambria, serif;
+    font-size: 4.7rem;
     font-weight: 400;
-    letter-spacing: 0.35em;
-    text-transform: lowercase;
-    color: #ccc;
+    font-style: italic;
+    /* Debossed: color dropped to burnished bronze so the glyph reads
+     * recessed, then stacked shadows do the sculptural work.
+     *   · hard dark line above = the carved lip catching the absence of light
+     *   · soft dark blur above = depth of the depression
+     *   · hard pale line below = the far rim catching the light
+     *   · soft pale glow below = bounce from the rim
+     */
+    color: #cbbc97;
+    line-height: 1.05;
     text-shadow:
-        -1.5px 0 1.5px rgba(255, 0, 170, 0.7),
-        1.5px 0 1.5px rgba(0, 220, 255, 0.7);
-    animation: chroma-drift 6s ease-in-out infinite;
+        0 -2px 0 rgba(0, 0, 0, 1),
+        0 -4px 8px rgba(0, 0, 0, 0.9),
+        0 2px 0 rgba(255, 240, 210, 0.3),
+        0 4px 5px rgba(255, 240, 210, 0.08);
 }
 
+/* Prose fragments — italic, parchment-dim */
 .rules,
-.field-label,
 .record-caption,
 .inline-note,
-.countdown-phase,
-.compose-status,
-.result-label,
-.footer-note,
-.slug-disclosure summary {
-    color: #666;
-    font-size: 0.7rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+.push-copy,
+.compose-status {
+    color: rgba(231, 221, 199, 0.42);
+    font-size: 0.95rem;
+    font-style: italic;
     line-height: 1.6;
+    white-space: pre-line;
 }
 
-.inline-note {
-    text-transform: none;
-    letter-spacing: 0.05em;
-    color: #777;
+/* Label set — small caps, muted, restrained tracking */
+.countdown-phase,
+.result-label {
+    color: var(--muted);
+    font-size: 0.95rem;
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.08em;
+    line-height: 1.4;
 }
 
-.footer-note {
-    margin-top: 0.5rem;
-    padding-top: 1rem;
-    border-top: 1px solid #1a1a1a;
+.compose-status {
+    color: var(--crimson);
 }
 
 .surface-body {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 2.5rem;
 }
 
-/* ----- compose / notice / content / link cards -------------- */
+/* ----- cards ------------------------------------------------- */
 
 .compose-card,
 .notice-card,
@@ -133,48 +190,68 @@ input {
 .link-card {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
-    padding: 1rem;
-    border: 1px solid #1a1a1a;
-    border-radius: 2px;
+    gap: 2rem;
+    /* Shift the card 8px up from the natural flex-gap position so the
+     * divider sits closer to the headline. */
+    margin-top: -0.5rem;
+}
+
+/* Stylized horizontal divider: thin line flanked by heavy angular
+ * quotation marks (U+276F, U+276E) as decorative ornaments. Pointing
+ * inward frames the line as a single mark, not a bare rule. */
+.divider {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.divider-line {
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+}
+
+.divider-end {
+    color: var(--brass-dim);
+    font-size: 0.9rem;
+    line-height: 1;
+    flex-shrink: 0;
+    /* Raise the glyphs a hair so their optical center aligns with the
+     * thin hairline rather than their baseline sitting on it. */
+    transform: translateY(-1px);
 }
 
 .compose-card.is-overtime {
-    border-color: rgba(255, 68, 68, 0.6);
-    animation: pulse 1.4s ease-in-out infinite;
+    animation: pulse 1.6s ease-in-out infinite;
 }
 
-.compose-card.is-refresh {
-    border-color: rgba(255, 136, 0, 0.45);
-}
-
-.compose-status {
-    color: #ff4444;
-}
-
-/* ----- countdown card --------------------------------------- */
+/* ----- countdown (subtle timeago line) ---------------------- */
 
 .countdown-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.75rem;
-    border: 1px solid #222;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.02);
+    gap: 0;
+}
+
+/* Phase label ("calm", "overtime") is internal vocabulary; overtime
+ * still animates the compose-card pulse, so the text label adds noise. */
+.countdown-phase {
+    display: none;
 }
 
 .countdown-time {
-    font-size: 1.8rem;
-    color: #fff;
+    font-size: 0.9rem;
+    font-style: italic;
+    color: rgba(231, 221, 199, 0.35);
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.1em;
+    letter-spacing: 0;
 }
 
-.compose-card.is-overtime .countdown-time,
-.compose-card.is-overtime .countdown-phase {
-    color: #ff8800;
+.compose-card.is-overtime .countdown-time {
+    color: rgba(214, 106, 58, 0.72);
 }
 
 /* ----- record stack ----------------------------------------- */
@@ -183,24 +260,60 @@ input {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1rem;
+    gap: 1.5rem;
+}
+
+/* Record button + "end here" sit side-by-side on rally states so the
+ * user reads them as alternatives — record a reply or end the channel
+ * with a single glance. On landing (no rally-end) it's just the record
+ * button centered. */
+.record-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5rem;
 }
 
 .record-btn {
-    width: 72px;
-    height: 72px;
+    --glow-intensity: 0;
+    width: 86px;
+    height: 86px;
     border-radius: 50%;
-    border: 1px solid #444;
-    background: transparent;
+    border: 1px solid var(--brass-dim);
+    background: radial-gradient(circle at 50% 35%, rgba(231, 221, 199, 0.04), rgba(0, 0, 0, 0.25) 75%);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: border-color 0.2s, opacity 0.2s;
+    /* Raised effect + voice-activity glow layer. The glow's size and
+     * alpha both scale with --glow-intensity (0 → silent, 1 → loud),
+     * and audio.js writes that value every animation frame while
+     * recording. Silent → transparent glow → effectively invisible. */
+    box-shadow:
+        0 0 calc(var(--glow-intensity) * 28px) calc(var(--glow-intensity) * 12px) rgba(204, 51, 51, calc(var(--glow-intensity) * 0.65)),
+        0 2px 4px rgba(0, 0, 0, 0.55),
+        0 10px 22px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(231, 221, 199, 0.09);
+    transition: border-color 0.25s, background 0.25s, transform 0.1s, opacity 0.25s;
 }
 
 .record-btn:hover:not(:disabled) {
-    border-color: #888;
+    border-color: var(--brass);
+    box-shadow:
+        0 0 calc(var(--glow-intensity) * 28px) calc(var(--glow-intensity) * 12px) rgba(204, 51, 51, calc(var(--glow-intensity) * 0.65)),
+        0 3px 5px rgba(0, 0, 0, 0.55),
+        0 14px 28px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(231, 221, 199, 0.14);
+}
+
+.record-btn:active:not(:disabled) {
+    transform: translateY(1px);
+    box-shadow:
+        0 0 calc(var(--glow-intensity) * 28px) calc(var(--glow-intensity) * 12px) rgba(204, 51, 51, calc(var(--glow-intensity) * 0.65)),
+        0 1px 2px rgba(0, 0, 0, 0.55),
+        0 4px 10px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(231, 221, 199, 0.06);
 }
 
 .record-btn:disabled,
@@ -211,96 +324,113 @@ input {
 }
 
 .record-btn .record-icon {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
-    background: #cc3333;
-    transition: border-radius 0.2s, background 0.2s;
+    background: var(--crimson);
+    transition: border-radius 0.25s, background 0.25s;
 }
 
 .record-btn.is-recording .record-icon {
     border-radius: 3px;
-    background: #fff;
+    background: var(--parchment);
 }
 
 .record-time {
-    color: #cc3333;
-    font-size: 1.2rem;
+    color: var(--crimson);
+    font-size: 1.35rem;
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.04em;
 }
 
 /* ----- form fields ------------------------------------------ */
 
-.compose-text,
-.slug-input,
 .link-out {
     width: 100%;
-    background: transparent;
-    border: 1px solid #444;
+    background: var(--ink-0);
+    border: 1px solid var(--rule);
     border-radius: 2px;
-    padding: 0.75rem;
-    color: #fff;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.8rem;
-    letter-spacing: 0.02em;
-}
-
-.compose-text {
-    min-height: 120px;
-    resize: vertical;
+    padding: 0.9rem 1rem;
+    color: var(--brass);
+    font-family: inherit;
+    font-size: 0.98rem;
     line-height: 1.55;
-}
-
-.compose-text:focus,
-.slug-input:focus {
-    outline: none;
-    border-color: #777;
-}
-
-.link-out {
     text-align: center;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.01em;
 }
 
-.slug-input {
-    text-transform: lowercase;
+.link-out::placeholder {
+    color: var(--muted);
+    font-style: italic;
 }
 
-.slug-disclosure {
+.link-out:focus {
+    outline: none;
+    border-color: var(--brass-dim);
+}
+
+.audio-preview {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    text-align: left;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0.85rem;
 }
 
-.slug-disclosure summary {
-    cursor: pointer;
-    list-style: none;
-}
-
-.slug-disclosure summary::-webkit-details-marker {
+.audio-preview audio {
     display: none;
 }
 
-.audio-preview,
 .played-audio {
     display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
 }
 
-audio {
-    width: 100%;
+.played-audio audio {
+    display: none;
+}
+
+.play-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--brass-dim);
+    background: transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--parchment);
+    padding: 0;
+    line-height: 1;
+    transition: border-color 0.25s, background 0.25s;
+}
+
+.play-btn:hover {
+    border-color: var(--brass);
+    background: rgba(201, 164, 76, 0.06);
+}
+
+.play-btn .play-icon {
+    display: inline-block;
+    font-size: 0.95rem;
+    /* Nudge the triangle so it feels optically centered — the glyph
+     * has more weight on its left edge, so shift right by 1px. */
+    transform: translateX(1px);
+}
+
+.play-btn.is-playing .play-icon {
+    transform: none;
 }
 
 .message-text {
-    color: #888;
-    font-size: 0.85rem;
+    color: var(--parchment);
+    font-size: 1.15rem;
     font-style: italic;
-    line-height: 1.6;
-    letter-spacing: 0.05em;
-    max-width: 400px;
+    line-height: 1.55;
+    max-width: 420px;
     margin: 0 auto;
     word-wrap: break-word;
     white-space: pre-wrap;
@@ -313,50 +443,94 @@ audio {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    padding: 0.75rem 1.5rem;
+    min-height: 46px;
+    padding: 0.75rem 1.75rem;
     border-radius: 2px;
     cursor: pointer;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    transition: opacity 0.2s, border-color 0.2s;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 400;
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.08em;
+    transition: opacity 0.2s, border-color 0.25s, background 0.25s, color 0.25s;
 }
 
 .send-btn {
-    background: #b8b8b8;
-    color: #0a0a0a;
-    border: none;
+    background: var(--brass);
+    color: var(--ink-0);
+    border: 1px solid var(--brass);
 }
 
 .send-btn:hover:not(:disabled) {
-    opacity: 0.8;
+    background: var(--brass-bright);
+    border-color: var(--brass-bright);
 }
 
 .ghost-btn {
     background: transparent;
-    color: #666;
-    border: 1px solid #444;
+    color: var(--parchment-dim);
+    border: 1px solid var(--rule-strong);
 }
 
 .ghost-btn:hover:not(:disabled) {
-    color: #aaa;
-    border-color: #888;
+    color: var(--parchment);
+    border-color: var(--brass-dim);
 }
 
-.compose-actions,
-.link-actions,
+.compose-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+}
+
 .push-actions {
     display: flex;
     gap: 0.75rem;
 }
 
+/* Direct button children of a notice card (e.g. the listen prompt)
+ * don't want to span the whole width — center them and pull in. */
+.notice-card > .send-btn,
+.notice-card > .ghost-btn {
+    align-self: center;
+    width: 70%;
+}
+
+/* Link-card actions stay intrinsic-width and center — share reads as
+ * modest, since the real action (sealing) is done. Copy gets a wider
+ * hit target since it's the primary thing the sender does next. */
+.link-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+}
+
+.link-actions .send-btn {
+    min-width: 8rem;
+}
+
+/* "end here" is the text-terminator alternative to recording a reply.
+ * It lives inline with the record button (.record-row), de-emphasized
+ * so it reads as the quiet second option, not a primary action. */
+.rally-end .ghost-btn {
+    border: none;
+    padding: 0.5rem 1rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.rally-end .ghost-btn:hover:not(:disabled) {
+    color: var(--parchment-dim);
+    background: transparent;
+}
+
 .compose-actions .send-btn,
-.compose-actions .ghost-btn,
-.link-actions .send-btn,
-.link-actions .ghost-btn,
+.compose-actions .ghost-btn {
+    flex: none;
+    width: 70%;
+}
+
 .push-actions .send-btn,
 .push-actions .ghost-btn {
     flex: 1;
@@ -364,8 +538,8 @@ audio {
 
 .compact {
     min-height: 40px;
-    padding: 0.6rem 1rem;
-    font-size: 0.7rem;
+    padding: 0.55rem 1rem;
+    font-size: 0.9rem;
 }
 
 /* ----- push prompt ------------------------------------------ */
@@ -373,69 +547,46 @@ audio {
 .push-prompt {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    padding-top: 1rem;
-    border-top: 1px solid #1a1a1a;
-}
-
-.push-copy {
-    color: #888;
-    font-size: 0.75rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    gap: 0.85rem;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--rule);
 }
 
 /* ----- sent confirmation ------------------------------------ */
 
 .sent-tick {
-    font-size: 1.6rem;
-    color: #b8b8b8;
-    letter-spacing: 0.15em;
+    font-size: 1.8rem;
+    font-style: italic;
+    color: var(--brass);
 }
 
 /* ----- empty / 404 state ------------------------------------ */
 
 .surface.is-empty .headline {
-    font-size: 1.8rem;
-    letter-spacing: 0.25em;
+    font-size: 2rem;
 }
 
 /* ----- animations ------------------------------------------- */
 
 .fade-in {
-    animation: reveal 0.3s ease-out forwards;
+    animation: reveal 0.28s ease-out forwards;
 }
 
 @keyframes reveal {
     from {
-        opacity: 0;
-        filter: blur(8px);
+        opacity: 0.55;
     }
     to {
         opacity: 1;
-        filter: blur(0);
-    }
-}
-
-@keyframes chroma-drift {
-    0%, 100% {
-        text-shadow:
-            -1.5px 0 1.5px rgba(255, 0, 170, 0.7),
-            1.5px 0 1.5px rgba(0, 220, 255, 0.7);
-    }
-    50% {
-        text-shadow:
-            -2px 0.5px 2px rgba(255, 0, 170, 0.75),
-            2px -0.5px 2px rgba(0, 220, 255, 0.75);
     }
 }
 
 @keyframes pulse {
     0%, 100% {
-        box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.2);
+        box-shadow: 0 0 0 0 rgba(176, 58, 58, 0.25);
     }
     50% {
-        box-shadow: 0 0 0 8px rgba(255, 68, 68, 0);
+        box-shadow: 0 0 0 10px rgba(176, 58, 58, 0);
     }
 }
 
@@ -443,16 +594,14 @@ audio {
 
 @media (max-width: 480px) {
     .app {
-        padding: 1.25rem;
+        padding: 2.5rem 1.25rem;
     }
 
     .headline {
-        font-size: 1.8rem;
+        font-size: 3.8rem;
     }
 
     /* Prevent iOS zoom on input focus */
-    .compose-text,
-    .slug-input,
     .link-out,
     input, textarea, select {
         font-size: 16px;
@@ -467,16 +616,11 @@ audio {
 
 @media (max-width: 360px) {
     .app {
-        padding: 1rem;
+        padding: 2rem 1rem;
     }
 
     .headline {
-        font-size: 1.6rem;
-        letter-spacing: 0.25em;
-    }
-
-    .brand-mark {
-        font-size: 0.7rem;
+        font-size: 3.05rem;
     }
 }
 
@@ -487,11 +631,11 @@ audio {
     }
 
     .app {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
+        padding-top: 1.5rem;
+        padding-bottom: 1.5rem;
     }
 
     .surface {
-        gap: 1rem;
+        gap: 2rem;
     }
 }
