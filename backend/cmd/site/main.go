@@ -61,14 +61,15 @@ func serve(filename string) (events.APIGatewayV2HTTPResponse, error) {
 		ct = "text/plain; charset=utf-8"
 	}
 
-	// HTML stays no-cache so updates flow immediately. Static assets
-	// (css, js, fonts) cache for a minute. The service worker is
-	// special: browsers re-fetch sw.js on every page load if
-	// Cache-Control allows, so keep it no-cache to ensure updates
-	// take effect.
+	// Cache tiers by content volatility:
+	// - HTML/SW: no-cache (VAPID injection, always fresh)
+	// - CSS/JS: 10 min (changes per deploy, not per request)
+	// - Fonts: 1 year (immutable between deploys)
 	cacheControl := "no-cache"
-	if ext != ".html" && !strings.HasSuffix(filename, "/sw.js") {
-		cacheControl = "public, max-age=60"
+	if ext == ".woff2" || ext == ".woff" || ext == ".ttf" || ext == ".otf" {
+		cacheControl = "public, max-age=31536000, immutable"
+	} else if ext != ".html" && !strings.HasSuffix(filename, "/sw.js") {
+		cacheControl = "public, max-age=600"
 	}
 
 	// Binary assets (fonts, images) must be base64-encoded so API

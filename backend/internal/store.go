@@ -456,6 +456,27 @@ func mergeValues(a, b map[string]ddbtypes.AttributeValue) map[string]ddbtypes.At
 	return out
 }
 
+// IncrementDailyCount atomically bumps the confession counter for
+// today. PK = "stats", SK = "YYYY-MM-DD". No user data, no slug,
+// no content — just a number.
+func (s *Store) IncrementDailyCount(ctx context.Context) {
+	today := Now().Format("2006-01-02")
+	_, _ = s.DDB.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName: &s.MetaTable,
+		Key: map[string]ddbtypes.AttributeValue{
+			"PK": &ddbtypes.AttributeValueMemberS{Value: "stats"},
+			"SK": &ddbtypes.AttributeValueMemberS{Value: today},
+		},
+		UpdateExpression: aws.String("ADD #c :one"),
+		ExpressionAttributeNames: map[string]string{
+			"#c": "count",
+		},
+		ExpressionAttributeValues: map[string]ddbtypes.AttributeValue{
+			":one": &ddbtypes.AttributeValueMemberN{Value: "1"},
+		},
+	})
+}
+
 // NewAudioKey returns a fresh S3 key for an audio blob on a slug.
 // Format: audio/<slug>/<hex>.opus. The 16-hex nonce prevents key
 // collision within a single slug's lifetime.

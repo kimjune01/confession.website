@@ -128,6 +128,10 @@ func Handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 
 		err := store.PutMeta(ctx, meta)
 		if err == nil {
+			// Bump the daily confession counter. Synchronous but
+			// errors are swallowed — a failed counter shouldn't
+			// block the 201.
+			store.IncrementDailyCount(ctx)
 			return internal.JSON(201, response{
 				Slug: slug,
 				URL:  "https://confession.website/" + slug,
