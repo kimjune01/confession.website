@@ -166,7 +166,7 @@ input {
 
 .headline {
     font-family: 'Charter', Georgia, Cambria, serif;
-    font-size: 4.7rem;
+    font-size: clamp(2.6rem, 10.5vw, 4.7rem);
     font-weight: 400;
     font-style: italic;
     line-height: 1;
@@ -851,11 +851,15 @@ input {
 
 @media (max-width: 480px) {
     .app {
-        padding: var(--sp-5) var(--sp-3);
+        padding: 3.5rem var(--sp-4) var(--sp-5);
     }
 
-    .headline {
-        font-size: 3.8rem;
+    /* Narrow column on phones so buttons and inputs don't span edge-to-edge.
+     * Centered within the app's content box. */
+    .surface {
+        width: 100%;
+        max-width: 320px;
+        align-self: center;
     }
 
     /* Prevent iOS zoom on input focus */
@@ -868,16 +872,14 @@ input {
     .link-actions,
     .push-actions {
         flex-direction: column;
-    }
-}
-
-@media (max-width: 360px) {
-    .app {
-        padding: var(--sp-5) var(--sp-3);
+        align-items: center;
     }
 
-    .headline {
-        font-size: 3.05rem;
+    .compose-actions > *,
+    .link-actions > *,
+    .push-actions > * {
+        width: 100%;
+        max-width: 240px;
     }
 }
 
